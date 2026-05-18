@@ -1,0 +1,4 @@
+[console_scripts]
+test_publisher = cup_stacking_verify.test_pub:main
+verifier = cup_stacking_verify.verifier_node:main
+

@@ -1,0 +1,20 @@
+[0.284s] Invoking command in '/home/ssu/vision-node_ws/build/cup_stacking_verify': PYTHONPATH=/home/ssu/vision-node_ws/build/cup_stacking_verify/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ssu/vision-node_ws/build/cup_stacking_verify/build --no-deps symlink_data --force
+[0.396s] running develop
+[0.467s] running egg_info
+[0.468s] writing cup_stacking_verify.egg-info/PKG-INFO
+[0.468s] writing dependency_links to cup_stacking_verify.egg-info/dependency_links.txt
+[0.468s] writing entry points to cup_stacking_verify.egg-info/entry_points.txt
+[0.468s] writing requirements to cup_stacking_verify.egg-info/requires.txt
+[0.468s] writing top-level names to cup_stacking_verify.egg-info/top_level.txt
+[0.468s] reading manifest file 'cup_stacking_verify.egg-info/SOURCES.txt'
+[0.469s] writing manifest file 'cup_stacking_verify.egg-info/SOURCES.txt'
+[0.469s] running build_ext
+[0.469s] Creating /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages/cup-stacking-verify.egg-link (link to .)
+[0.470s] Installing test_publisher script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+[0.470s] Installing verifier script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+[0.470s] 
+[0.470s] Installed /home/ssu/vision-node_ws/build/cup_stacking_verify
+[0.470s] running symlink_data
+[0.470s] symbolically linking /home/ssu/vision-node_ws/build/cup_stacking_verify/resource/cup_stacking_verify -> /home/ssu/vision-node_ws/install/cup_stacking_verify/share/ament_index/resource_index/packages
+[0.470s] symbolically linking /home/ssu/vision-node_ws/build/cup_stacking_verify/package.xml -> /home/ssu/vision-node_ws/install/cup_stacking_verify/share/cup_stacking_verify
+[0.483s] Invoked command in '/home/ssu/vision-node_ws/build/cup_stacking_verify' returned '0': PYTHONPATH=/home/ssu/vision-node_ws/build/cup_stacking_verify/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ssu/vision-node_ws/build/cup_stacking_verify/build --no-deps symlink_data --force
