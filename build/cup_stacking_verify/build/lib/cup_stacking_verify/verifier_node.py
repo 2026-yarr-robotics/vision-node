@@ -19,6 +19,12 @@ class CupOccupancyNode(Node):
         self.declare_parameter('v_dir', [1.0, 0.0, 0.0])
         self.declare_parameter('threshold', 0.6)
         self.declare_parameter('target_index', 0)
+        # Frame for all RViz markers. depth_digital_twin bridges detections in
+        # `world` (= robot base), so default to `world` to keep this node's
+        # markers aligned with the real cup detections without a world↔base_link
+        # TF. Override to `base_link` if such a TF exists.
+        self.declare_parameter('target_frame', 'world')
+        self.frame_id = str(self.get_parameter('target_frame').value)
 
         # 2. Pub/Sub
         self.sub_detection = self.create_subscription(
@@ -35,7 +41,7 @@ class CupOccupancyNode(Node):
     def create_marker(self, v_min, v_max, is_occupied, index, overlap_ratio=None):
         """RViz에 띄울 박스 마커 생성"""
         marker = Marker()
-        marker.header.frame_id = "base_link"
+        marker.header.frame_id = self.frame_id
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.ns = "virtual_cups"
         marker.id = index
@@ -62,7 +68,7 @@ class CupOccupancyNode(Node):
     def create_text_marker(self, position, text, index):
         """Overlap 비율을 표시하는 텍스트 마커 생성"""
         marker = Marker()
-        marker.header.frame_id = "base_link"
+        marker.header.frame_id = self.frame_id
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.ns = "overlap_text"
         marker.id = index
@@ -79,7 +85,7 @@ class CupOccupancyNode(Node):
     def create_detected_cup_marker(self, detection, index):
         """검출된 컵을 박스로 시각화하는 마커 생성"""
         marker = Marker()
-        marker.header.frame_id = "base_link"
+        marker.header.frame_id = self.frame_id
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.ns = "detected_cups"
         marker.id = index

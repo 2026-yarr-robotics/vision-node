@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'cup_stacking_verify'
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+        ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -26,6 +30,9 @@ setup(
         'console_scripts': [
             'verifier = cup_stacking_verify.verifier_node:main',
             'test_publisher = cup_stacking_verify.test_pub:main', # 이 줄이 반드시 있어야 함!
+            'boxes_to_detections = cup_stacking_verify.boxes_to_detections_node:main',
+            'topic_logger = cup_stacking_verify.topic_logger_node:main',
+            'pose_tuner = cup_stacking_verify.pose_tuner_node:main',
         ],
     },
 )

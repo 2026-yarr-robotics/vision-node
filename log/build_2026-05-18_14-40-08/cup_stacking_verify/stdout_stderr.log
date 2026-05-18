@@ -1,0 +1,22 @@
+running develop
+running egg_info
+writing cup_stacking_verify.egg-info/PKG-INFO
+writing dependency_links to cup_stacking_verify.egg-info/dependency_links.txt
+writing entry points to cup_stacking_verify.egg-info/entry_points.txt
+writing requirements to cup_stacking_verify.egg-info/requires.txt
+writing top-level names to cup_stacking_verify.egg-info/top_level.txt
+reading manifest file 'cup_stacking_verify.egg-info/SOURCES.txt'
+writing manifest file 'cup_stacking_verify.egg-info/SOURCES.txt'
+running build_ext
+Creating /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/lib/python3.10/site-packages/cup-stacking-verify.egg-link (link to .)
+Installing boxes_to_detections script to /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing test_publisher script to /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing topic_logger script to /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing verifier script to /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/lib/cup_stacking_verify
+
+Installed /home/eunwoosong/Projects/vision-node/build/cup_stacking_verify
+running symlink_data
+symbolically linking /home/eunwoosong/Projects/vision-node/build/cup_stacking_verify/resource/cup_stacking_verify -> /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/share/ament_index/resource_index/packages
+symbolically linking /home/eunwoosong/Projects/vision-node/build/cup_stacking_verify/package.xml -> /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/share/cup_stacking_verify
+creating /home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/share/cup_stacking_verify/launch
+error: [Errno 2] No such file or directory: '/home/eunwoosong/Projects/vision-node/install/cup_stacking_verify/share/cup_stacking_verify/launch/cup_verify.launch.py'

@@ -1,1 +1,1 @@
-geometry_msgs:rclpy:std_msgs:vision_msgs
+geometry_msgs:rclpy:ros2launch:rviz2:std_msgs:vision_msgs:visualization_msgs
