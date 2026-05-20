@@ -13,10 +13,12 @@ class CupOccupancyNode(Node):
         super().__init__('cup_occupancy_verifier')
 
         # 1. 스펙 및 파라미터
-        self.cup_ref_w = 0.078
-        self.cup_ref_d = 0.078
-        self.cup_ref_h = 0.095
+        self.cup_ref_w = 0.070
+        self.cup_ref_d = 0.070
+        self.cup_ref_h = 0.086
         self.cup_ref_vol = self.cup_ref_w * self.cup_ref_d * self.cup_ref_h
+        self.layer_gap  = 0.002   # 레이어 간 수직 간격 (m)
+        self.box_margin = 0.010   # 박스 시각화 여백 — 인접 컵 사이 간격 표현 (m)
 
         self.declare_parameter('p_start', [0.5, 0.0, 0.1])
         self.declare_parameter('v_dir', [1.0, 0.0, 0.0])
@@ -70,8 +72,7 @@ class CupOccupancyNode(Node):
         else:
             unit_dir = [v_dir[0]/mag, v_dir[1]/mag, v_dir[2]/mag]
 
-        # 레이어 높이 추가 계산
-        layer_height = self.cup_ref_h + 0.02  # 각 레이어 간 간격 추가
+        layer_height = self.cup_ref_h + self.layer_gap
         # 피라미드 구조: 상위 레이어는 진행 방향으로 cup_ref_w/2씩 오프셋
         offset = (index + layer * 0.5) * self.cup_ref_w
         c_x = p_start[0] + offset * unit_dir[0]
@@ -155,8 +156,8 @@ class CupOccupancyNode(Node):
         m.pose.position.y = (v_min[1] + v_max[1]) / 2
         m.pose.position.z = (v_min[2] + v_max[2]) / 2
         m.pose.orientation.w = 1.0
-        m.scale.x = self.cup_ref_w
-        m.scale.y = self.cup_ref_d
+        m.scale.x = self.cup_ref_w - 2 * self.box_margin
+        m.scale.y = self.cup_ref_d - 2 * self.box_margin
         m.scale.z = self.cup_ref_h
         if is_occupied:
             m.color.r, m.color.g, m.color.b, m.color.a = 0.0, 1.0, 0.0, 0.5
@@ -208,8 +209,8 @@ class CupOccupancyNode(Node):
         m.pose.orientation.w = 1.0
         m.scale.x = 0.003
         m.color.r, m.color.g, m.color.b, m.color.a = 1.0, 0.85, 0.1, 0.9
-        x0, y0, z0 = v_min
-        x1, y1, z1 = v_max
+        x0, y0, z0 = v_min[0], v_min[1], v_min[2]
+        x1, y1, z1 = v_max[0], v_max[1], v_max[2]
         c = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
              (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
         edges = [(0, 1), (1, 2), (2, 3), (3, 0),

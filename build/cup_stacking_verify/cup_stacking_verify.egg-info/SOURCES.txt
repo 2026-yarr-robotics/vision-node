@@ -11,6 +11,7 @@ setup.py
 ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/zip-safe
 cup_stacking_verify/__init__.py
 cup_stacking_verify/boxes_to_detections_node.py
+cup_stacking_verify/pose_tuner_node.py
 cup_stacking_verify/test_pub.py
 cup_stacking_verify/topic_logger_node.py
 cup_stacking_verify/verifier_node.py

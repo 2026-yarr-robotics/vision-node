@@ -12,9 +12,9 @@ class TestPublisher(Node):
     def publish_test_data(self):
         msg = Detection3DArray()
 
-        CUP_W = 0.078
-        CUP_H = 0.095
-        LAYER_H = CUP_H + 0.02   # 0.115, matches verifier's layer_height
+        CUP_W = 0.070   # verifier cup_ref_w와 동일
+        CUP_H = 0.086   # verifier cup_ref_h와 동일
+        LAYER_H = CUP_H + 0.002  # verifier layer_gap=0.002 와 동일
         X0 = 0.5
         Z0 = 0.1                  # z = top of cup (verifier convention)
 

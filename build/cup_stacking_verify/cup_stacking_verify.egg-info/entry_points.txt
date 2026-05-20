@@ -1,5 +1,6 @@
 [console_scripts]
 boxes_to_detections = cup_stacking_verify.boxes_to_detections_node:main
+pose_tuner = cup_stacking_verify.pose_tuner_node:main
 test_publisher = cup_stacking_verify.test_pub:main
 topic_logger = cup_stacking_verify.topic_logger_node:main
 verifier = cup_stacking_verify.verifier_node:main

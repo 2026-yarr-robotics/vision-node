@@ -1,0 +1,26 @@
+running egg_info
+writing ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/PKG-INFO
+writing dependency_links to ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/dependency_links.txt
+writing entry points to ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/entry_points.txt
+writing requirements to ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/requires.txt
+writing top-level names to ../../build/cup_stacking_verify/cup_stacking_verify.egg-info/top_level.txt
+reading manifest file '../../build/cup_stacking_verify/cup_stacking_verify.egg-info/SOURCES.txt'
+writing manifest file '../../build/cup_stacking_verify/cup_stacking_verify.egg-info/SOURCES.txt'
+running build
+running build_py
+copying cup_stacking_verify/verifier_node.py -> /home/ssu/vision-node_ws/build/cup_stacking_verify/build/lib/cup_stacking_verify
+running install
+running install_lib
+copying /home/ssu/vision-node_ws/build/cup_stacking_verify/build/lib/cup_stacking_verify/verifier_node.py -> /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages/cup_stacking_verify
+byte-compiling /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages/cup_stacking_verify/verifier_node.py to verifier_node.cpython-310.pyc
+running install_data
+running install_egg_info
+removing '/home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages/cup_stacking_verify-0.0.0-py3.10.egg-info' (and everything under it)
+Copying ../../build/cup_stacking_verify/cup_stacking_verify.egg-info to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/python3.10/site-packages/cup_stacking_verify-0.0.0-py3.10.egg-info
+running install_scripts
+Installing boxes_to_detections script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing pose_tuner script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing test_publisher script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing topic_logger script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+Installing verifier script to /home/ssu/vision-node_ws/install/cup_stacking_verify/lib/cup_stacking_verify
+writing list of installed files to '/home/ssu/vision-node_ws/build/cup_stacking_verify/install.log'
