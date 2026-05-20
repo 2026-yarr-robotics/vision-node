@@ -1,11 +1,39 @@
+import json
 import math
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int8, Float32
+from std_msgs.msg import Float32, Int8, Int32MultiArray, String
 from geometry_msgs.msg import Point
 from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
+
+
+# Slot naming per layer cup count. Bottom layer = level 1.
+# Indices are left→right within the layer (verifier sorts by x).
+_SLOT_NAMES_BY_COUNT: dict[int, list[str]] = {
+    1: ['top'],
+    2: ['left', 'right'],
+    3: ['left', 'mid', 'right'],
+    4: ['p0', 'p1', 'p2', 'p3'],
+}
+
+
+def _slot_name(level: int, pos_idx: int, layer_count: int) -> str:
+    """e.g. (1, 0, 3) → 'L1_left'; (3, 0, 1) → 'L3_top'."""
+    suffixes = _SLOT_NAMES_BY_COUNT.get(
+        layer_count, [f'p{i}' for i in range(layer_count)])
+    suffix = suffixes[pos_idx] if pos_idx < len(suffixes) else f'p{pos_idx}'
+    return f'L{level}_{suffix}'
+
+
+def _build_slot_keys(virtual_counts: list[int]) -> list[str]:
+    """All slot keys for the configured layout, layer 1 → top."""
+    keys: list[str] = []
+    for layer_idx, count in enumerate(virtual_counts):
+        for pos_i in range(count):
+            keys.append(_slot_name(layer_idx + 1, pos_i, count))
+    return keys
 
 
 class CupOccupancyNode(Node):
@@ -49,6 +77,20 @@ class CupOccupancyNode(Node):
         self.pub_status = self.create_publisher(Int8, '/cup_occupancy_status', 10)
         self.pub_ratio = self.create_publisher(Float32, '/cup_overlap_ratio', 10)
         self.pub_marker = self.create_publisher(MarkerArray, '/virtual_cup_markers', 10)
+        # Slot-level publications (system_state_aggregator + depth exclusion).
+        # /stack         — JSON {slot_name: <color>|null} for every slot in the
+        #                  configured layout. Sticky: emitted every render tick
+        #                  even with no detections (slots all null).
+        # /stack_track_ids — depth track ids currently occupying ANY slot, so
+        #                  depth's /cups_on_table can subtract them.
+        self.pub_stack = self.create_publisher(String, '/stack', 10)
+        self.pub_stack_ids = self.create_publisher(
+            Int32MultiArray, '/stack_track_ids', 10)
+        # Slot occupancy threshold (separate from `threshold` which gates the
+        # overall Int8 status). Default lower so partial fits still register.
+        self.declare_parameter('slot_occupancy_overlap_min', 0.4)
+        self._stack_slot_keys = _build_slot_keys(
+            list(self.get_parameter('virtual_counts').value))
 
         # Latest detections, rendered by the timer (decoupled from arrival rate
         # so the boundary/pose markers are published even with no detections).
@@ -136,8 +178,58 @@ class CupOccupancyNode(Node):
         for r in records:
             self.pub_status.publish(Int8(data=1 if r['occupied'] else 0))
         self.pub_ratio.publish(Float32(data=max_ratio))
+        self._publish_stack(records)
         self.get_logger().info(
             f'Layers detected: {layer_sizes} | Max overlap: {max_ratio:.2f}')
+
+    # ── /stack + /stack_track_ids 발행 ────────────────────────────────────
+    def _publish_stack(self, records: list[dict]) -> None:
+        """Publish /stack (JSON {slot: color|null}) and /stack_track_ids.
+
+        Slot keys come from the configured `virtual_counts` layout, so the
+        emitted schema is constant — empty slots remain `null`. A record
+        contributes a slot ONLY when its overlap clears
+        `slot_occupancy_overlap_min` (default 0.4) AND its layer/position
+        falls within the configured layout (extra cups overflow → ignored).
+        """
+        min_overlap = float(
+            self.get_parameter('slot_occupancy_overlap_min').value)
+        virtual_counts = list(self.get_parameter('virtual_counts').value)
+        slot_map: dict[str, str | None] = {
+            k: None for k in self._stack_slot_keys}
+        track_ids: list[int] = []
+
+        for r in records:
+            if r['ratio'] < min_overlap:
+                continue
+            layer_idx, pos_i = r['layer'], r['pos']
+            if layer_idx >= len(virtual_counts):
+                continue
+            vcount = int(virtual_counts[layer_idx])
+            if pos_i >= vcount:
+                continue
+            slot = _slot_name(layer_idx + 1, pos_i, vcount)
+            slot_map[slot] = self._color_of(r['detection'])
+            try:
+                track_ids.append(int(r['detection'].id))
+            except (ValueError, TypeError):
+                pass
+
+        self.pub_stack.publish(
+            String(data=json.dumps(slot_map, ensure_ascii=False)))
+        ids_msg = Int32MultiArray()
+        ids_msg.data = sorted(set(track_ids))
+        self.pub_stack_ids.publish(ids_msg)
+
+    @staticmethod
+    def _color_of(det) -> str:
+        """Color label forwarded by boxes_to_detections_node via
+        results[0].hypothesis.class_id. 'unknown' if not propagated."""
+        try:
+            label = det.results[0].hypothesis.class_id
+        except (AttributeError, IndexError):
+            return 'unknown'
+        return label or 'unknown'
 
     # ── 마커 빌더 ──────────────────────────────────────────────────────────
     def _hdr(self, marker):
@@ -289,9 +381,14 @@ class CupOccupancyNode(Node):
         # 3) 검출 오버레이 (최근 검출이 있을 때만)
         now_s = self.get_clock().now().nanoseconds * 1e-9
         timeout = float(self.get_parameter('detection_timeout_s').value)
-        if (self._last_msg is not None
-                and self._last_msg.detections
-                and now_s - self._last_stamp_s <= timeout):
+        fresh = (self._last_msg is not None
+                 and self._last_msg.detections
+                 and now_s - self._last_stamp_s <= timeout)
+        # Heartbeat: when no fresh detection, still emit an all-null /stack so
+        # downstream consumers see a steady schema, not topic silence.
+        if not fresh:
+            self._publish_stack([])
+        if fresh:
             threshold = self.get_parameter('threshold').value
             records, _, _ = self._compute_layers(self._last_msg, threshold)
             for r in records:

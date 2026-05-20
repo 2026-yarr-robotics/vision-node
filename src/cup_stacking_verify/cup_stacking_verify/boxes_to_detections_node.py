@@ -25,8 +25,19 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        QoSReliabilityPolicy)
-from vision_msgs.msg import Detection3D, Detection3DArray
+from vision_msgs.msg import (Detection3D, Detection3DArray,
+                             ObjectHypothesisWithPose)
 from visualization_msgs.msg import Marker, MarkerArray
+
+
+# Color tokens that depth_digital_twin embeds in its box_labels text.
+# point_cloud_node prefixes the per-track label with `c=<color>_…`; we parse
+# the token after `c=` and forward it on the Detection3D so downstream
+# consumers (verifier → /stack) don't need to know depth's label format.
+_KNOWN_COLORS = {
+    'red', 'orange', 'yellow', 'green', 'blue', 'purple',
+    'white', 'black', 'gray', 'unknown',
+}
 
 
 class BoxesToDetectionsNode(Node):
@@ -105,6 +116,11 @@ class BoxesToDetectionsNode(Node):
                     float(m.pose.position.y),
                     float(m.pose.position.z))
                 changed = True
+            elif m.ns == 'box_labels':
+                color = _parse_color(m.text)
+                if color is not None:
+                    self._boxes.setdefault(m.id, {})['color'] = color
+                    changed = True
 
         if changed:
             self._publish()
@@ -145,6 +161,12 @@ class BoxesToDetectionsNode(Node):
             det.bbox.size.x = sx
             det.bbox.size.y = sy
             det.bbox.size.z = sz
+            color = b.get('color')
+            if color:
+                hyp = ObjectHypothesisWithPose()
+                hyp.hypothesis.class_id = color
+                hyp.hypothesis.score = 1.0
+                det.results.append(hyp)
             out.detections.append(det)
             n += 1
 
@@ -152,6 +174,23 @@ class BoxesToDetectionsNode(Node):
         self.get_logger().info(
             f'→ /detected_cups : {n} cup(s)  ids={sorted(self._boxes)}',
             throttle_duration_sec=1.0)
+
+
+def _parse_color(text: str) -> str | None:
+    """Extract the `c=<color>` token from a depth_digital_twin box_labels
+    text. Returns the color string if it matches a known palette entry, else
+    None. Labels are underscore-separated tokens like
+    "#7_red_cup_0.87_r=12mm_(0.31,0.04,0.18)" (color appears immediately
+    after the track id when depth has classified it)."""
+    if not text:
+        return None
+    for tok in text.replace('\n', '_').split('_'):
+        t = tok.strip().lower()
+        if t in _KNOWN_COLORS:
+            return t
+        if t.startswith('c=') and t[2:] in _KNOWN_COLORS:
+            return t[2:]
+    return None
 
 
 def main(args: Iterable[str] | None = None) -> None:
