@@ -9,28 +9,33 @@ from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
 
+# Fixed pyramid layout — bottom→top.  The verifier deliberately caps at this
+# layout: 3 cups on L1, 2 on L2, 1 on L3 (total 6).  Any observed detections
+# beyond layer 2 or beyond a layer's count are dropped from both the slot map
+# and the RViz overlay.
+LAYER_COUNTS: tuple[int, ...] = (3, 2, 1)
+
 # Slot naming per layer cup count. Bottom layer = level 1.
 # Indices are left→right within the layer (verifier sorts by x).
 _SLOT_NAMES_BY_COUNT: dict[int, list[str]] = {
-    1: ['top'],
-    2: ['left', 'right'],
-    3: ['left', 'mid', 'right'],
-    4: ['p0', 'p1', 'p2', 'p3'],
+    1: ['T'],
+    2: ['L', 'R'],
+    3: ['L', 'M', 'R'],
 }
 
 
 def _slot_name(level: int, pos_idx: int, layer_count: int) -> str:
-    """e.g. (1, 0, 3) → 'L1_left'; (3, 0, 1) → 'L3_top'."""
+    """e.g. (1, 0, 3) → 'L1_L'; (3, 0, 1) → 'L3_T'."""
     suffixes = _SLOT_NAMES_BY_COUNT.get(
         layer_count, [f'p{i}' for i in range(layer_count)])
     suffix = suffixes[pos_idx] if pos_idx < len(suffixes) else f'p{pos_idx}'
     return f'L{level}_{suffix}'
 
 
-def _build_slot_keys(virtual_counts: list[int]) -> list[str]:
-    """All slot keys for the configured layout, layer 1 → top."""
+def _build_slot_keys(layer_counts=LAYER_COUNTS) -> list[str]:
+    """All slot keys for the layout, layer 1 → top."""
     keys: list[str] = []
-    for layer_idx, count in enumerate(virtual_counts):
+    for layer_idx, count in enumerate(layer_counts):
         for pos_i in range(count):
             keys.append(_slot_name(layer_idx + 1, pos_i, count))
     return keys
@@ -48,8 +53,12 @@ class CupOccupancyNode(Node):
         self.layer_gap  = 0.002   # 레이어 간 수직 간격 (m)
         self.box_margin = 0.010   # 박스 시각화 여백 — 인접 컵 사이 간격 표현 (m)
 
-        self.declare_parameter('p_start', [0.5, 0.0, 0.1])
-        self.declare_parameter('v_dir', [1.0, 0.0, 0.0])
+        # New geometry: cp = L1_M position (centre of the bottom layer),
+        # degree = row orientation in degrees (base +X = 0°, CCW positive
+        # around base +Z).  Replaces the old p_start (L1_L) + v_dir (3D unit)
+        # pair so the pose can be set with the same convention the API uses.
+        self.declare_parameter('cp', [0.5, 0.0, 0.1])
+        self.declare_parameter('degree', 0.0)
         self.declare_parameter('threshold', 0.6)
         self.declare_parameter('target_index', 0)
         # Frame for all RViz markers. depth_digital_twin bridges detections in
@@ -57,15 +66,13 @@ class CupOccupancyNode(Node):
         # markers aligned with the real cup detections without a world↔base_link
         # TF. Override to `base_link` if such a TF exists.
         self.declare_parameter('target_frame', 'world')
-        # Target stack layout (cups per layer, bottom → top). Drawn as an
-        # always-on boundary even when no cups are detected.
-        self.declare_parameter('virtual_counts', [3, 2, 1])
-        # Render/boundary publish rate. p_start/v_dir are re-read every tick so
-        # the pose_tuner UI applies in real time.
+        # Render/boundary publish rate. cp/degree are re-read every tick so
+        # the pose_tuner UI applies in real time.  The pyramid layout itself
+        # is fixed by LAYER_COUNTS at module scope and NOT parameterisable.
         self.declare_parameter('publish_rate_hz', 10.0)
         # Detected-cup overlay is shown only while detections are this fresh.
         self.declare_parameter('detection_timeout_s', 1.5)
-        # Length of the v_dir arrow marker (m).
+        # Length of the degree-direction arrow marker (m, in base XY plane).
         self.declare_parameter('arrow_length', 0.25)
 
         self.frame_id = str(self.get_parameter('target_frame').value)
@@ -89,8 +96,7 @@ class CupOccupancyNode(Node):
         # Slot occupancy threshold (separate from `threshold` which gates the
         # overall Int8 status). Default lower so partial fits still register.
         self.declare_parameter('slot_occupancy_overlap_min', 0.4)
-        self._stack_slot_keys = _build_slot_keys(
-            list(self.get_parameter('virtual_counts').value))
+        self._stack_slot_keys = _build_slot_keys(LAYER_COUNTS)
 
         # Latest detections, rendered by the timer (decoupled from arrival rate
         # so the boundary/pose markers are published even with no detections).
@@ -105,25 +111,38 @@ class CupOccupancyNode(Node):
             f"@ {rate:.0f} Hz (frame={self.frame_id})")
 
     # ── 가상 박스 기하 ─────────────────────────────────────────────────────
-    def get_virtual_box(self, index, layer=0):
-        p_start = self.get_parameter('p_start').value
-        v_dir = self.get_parameter('v_dir').value
-        mag = (v_dir[0]**2 + v_dir[1]**2 + v_dir[2]**2)**0.5
-        if mag < 1e-9:
-            unit_dir = [1.0, 0.0, 0.0]
+    def get_virtual_box(self, index: int, layer: int = 0):
+        """AABB for slot (layer, index) in the fixed [3,2,1] layout.
+
+        Geometry (cp = L1_M, degree = base +X CCW around base +Z):
+          • Row direction  d = (cos θ, sin θ, 0),  θ = radians(degree)
+          • Within a layer of N cups, slot i is placed at offset
+                (i − (N−1)/2) · cup_w  along d
+            so layer L1 (N=3) → −w, 0, +w  (L, M, R)
+               layer L2 (N=2) → −0.5w, +0.5w  (L, R nested between L1)
+               layer L3 (N=1) → 0          (T directly above L1_M)
+          • Vertical: cp.z + layer · (cup_h + layer_gap)
+        Box itself stays AABB (matching depth_digital_twin's box convention).
+        """
+        cp = self.get_parameter('cp').value
+        deg = float(self.get_parameter('degree').value)
+        theta = math.radians(deg)
+        ux, uy = math.cos(theta), math.sin(theta)
+
+        if 0 <= layer < len(LAYER_COUNTS):
+            n = LAYER_COUNTS[layer]
         else:
-            unit_dir = [v_dir[0]/mag, v_dir[1]/mag, v_dir[2]/mag]
+            n = 1                               # graceful for callers that
+                                                # somehow probe layer ≥ 3
+        offset = (index - (n - 1) / 2.0) * self.cup_ref_w
 
-        layer_height = self.cup_ref_h + self.layer_gap
-        # 피라미드 구조: 상위 레이어는 진행 방향으로 cup_ref_w/2씩 오프셋
-        offset = (index + layer * 0.5) * self.cup_ref_w
-        c_x = p_start[0] + offset * unit_dir[0]
-        c_y = p_start[1] + offset * unit_dir[1]
-        c_z = p_start[2] + offset * unit_dir[2] + layer * layer_height
+        c_x = float(cp[0]) + offset * ux
+        c_y = float(cp[1]) + offset * uy
+        c_z = float(cp[2]) + layer * (self.cup_ref_h + self.layer_gap)
 
-        v_min = [c_x - self.cup_ref_w/2, c_y - self.cup_ref_d/2, c_z - self.cup_ref_h]
-        v_max = [c_x + self.cup_ref_w/2, c_y + self.cup_ref_d/2, c_z]
-        return v_min, v_max
+        return ([c_x - self.cup_ref_w/2, c_y - self.cup_ref_d/2,
+                 c_z - self.cup_ref_h],
+                [c_x + self.cup_ref_w/2, c_y + self.cup_ref_d/2, c_z])
 
     def calculate_overlap_ratio(self, v_min, v_max, d_min, d_max):
         dx = max(0, min(v_max[0], d_max[0]) - max(v_min[0], d_min[0]))
@@ -133,7 +152,16 @@ class CupOccupancyNode(Node):
 
     def _compute_layers(self, msg, threshold):
         """검출을 레이어로 묶고 가상 박스와 overlap 계산.
-        Returns (records, max_ratio, layer_sizes)."""
+
+        Pyramid layout is fixed by LAYER_COUNTS=(3,2,1).  Detections that fall
+        outside the layout — extra layers above L3, or extra cups beyond each
+        layer's slot count — are intentionally DROPPED here so downstream
+        consumers (slot dict, RViz overlay, /stack) only ever see at most
+        3+2+1 = 6 records.
+
+        Returns (records, max_ratio, layer_sizes).  `layer_sizes` reports the
+        OBSERVED per-layer counts before capping, useful for logging.
+        """
         z_tol = self.cup_ref_h / 2
         layers = []  # 같은 레이어의 detection 목록
         for detection in msg.detections:
@@ -148,12 +176,18 @@ class CupOccupancyNode(Node):
                 layers.append([detection])
 
         layers.sort(key=lambda g: g[0].bbox.center.position.z)  # bottom→top
+        observed_sizes = [len(g) for g in layers]
 
         records = []
         max_ratio = 0.0
         for layer_idx, layer_cups in enumerate(layers):
+            if layer_idx >= len(LAYER_COUNTS):
+                break                                  # cap at 3 tiers
+            slot_count = LAYER_COUNTS[layer_idx]
             layer_cups.sort(key=lambda d: d.bbox.center.position.x)
             for pos_i, detection in enumerate(layer_cups):
+                if pos_i >= slot_count:
+                    break                              # cap per-layer slots
                 pos = detection.bbox.center.position
                 size = detection.bbox.size
                 d_min = [pos.x - size.x/2, pos.y - size.y/2, pos.z - size.z]
@@ -166,7 +200,7 @@ class CupOccupancyNode(Node):
                     'v_min': v_min, 'v_max': v_max, 'ratio': ratio,
                     'occupied': ratio > threshold,
                 })
-        return records, max_ratio, [len(g) for g in layers]
+        return records, max_ratio, observed_sizes
 
     # ── 콜백: status/ratio 즉시 발행, 마커는 타이머가 렌더 ──────────────────
     def detection_callback(self, msg):
@@ -186,15 +220,14 @@ class CupOccupancyNode(Node):
     def _publish_stack(self, records: list[dict]) -> None:
         """Publish /stack (JSON {slot: color|null}) and /stack_track_ids.
 
-        Slot keys come from the configured `virtual_counts` layout, so the
-        emitted schema is constant — empty slots remain `null`. A record
-        contributes a slot ONLY when its overlap clears
-        `slot_occupancy_overlap_min` (default 0.4) AND its layer/position
-        falls within the configured layout (extra cups overflow → ignored).
+        Slot keys are the fixed LAYER_COUNTS layout, so the emitted schema is
+        constant — empty slots stay `null`.  A record contributes only when
+        its overlap clears `slot_occupancy_overlap_min` (default 0.4).
+        `_compute_layers` has already capped records to the layout, but we
+        re-check the bounds defensively here.
         """
         min_overlap = float(
             self.get_parameter('slot_occupancy_overlap_min').value)
-        virtual_counts = list(self.get_parameter('virtual_counts').value)
         slot_map: dict[str, str | None] = {
             k: None for k in self._stack_slot_keys}
         track_ids: list[int] = []
@@ -203,9 +236,9 @@ class CupOccupancyNode(Node):
             if r['ratio'] < min_overlap:
                 continue
             layer_idx, pos_i = r['layer'], r['pos']
-            if layer_idx >= len(virtual_counts):
+            if layer_idx >= len(LAYER_COUNTS):
                 continue
-            vcount = int(virtual_counts[layer_idx])
+            vcount = LAYER_COUNTS[layer_idx]
             if pos_i >= vcount:
                 continue
             slot = _slot_name(layer_idx + 1, pos_i, vcount)
@@ -314,9 +347,14 @@ class CupOccupancyNode(Node):
         return m
 
     def _pose_markers(self):
-        """p_start(구) + v_dir(화살표) + 라벨 — 항상 표시."""
-        p = self.get_parameter('p_start').value
-        d = self.get_parameter('v_dir').value
+        """cp 구 + degree 화살표 + 라벨 — 항상 표시.
+
+        Sphere sits at cp (= L1_M).  Arrow shows the +X row direction in the
+        base XY plane (length = arrow_length parameter)."""
+        cp = self.get_parameter('cp').value
+        deg = float(self.get_parameter('degree').value)
+        theta = math.radians(deg)
+        ux, uy = math.cos(theta), math.sin(theta)
         out = []
 
         sphere = self._hdr(Marker())
@@ -324,37 +362,36 @@ class CupOccupancyNode(Node):
         sphere.id = 0
         sphere.type = Marker.SPHERE
         sphere.action = Marker.ADD
-        sphere.pose.position.x = float(p[0])
-        sphere.pose.position.y = float(p[1])
-        sphere.pose.position.z = float(p[2])
+        sphere.pose.position.x = float(cp[0])
+        sphere.pose.position.y = float(cp[1])
+        sphere.pose.position.z = float(cp[2])
         sphere.pose.orientation.w = 1.0
         sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.035
         sphere.color.r, sphere.color.g, sphere.color.b, sphere.color.a = 1.0, 0.4, 0.0, 1.0
         out.append(sphere)
 
-        mag = math.sqrt(d[0]**2 + d[1]**2 + d[2]**2)
-        if mag > 1e-9:
-            L = float(self.get_parameter('arrow_length').value)
-            ux, uy, uz = d[0]/mag, d[1]/mag, d[2]/mag
-            arrow = self._hdr(Marker())
-            arrow.ns = "pose_dir"
-            arrow.id = 0
-            arrow.type = Marker.ARROW
-            arrow.action = Marker.ADD
-            arrow.pose.orientation.w = 1.0
-            arrow.points.append(Point(x=float(p[0]), y=float(p[1]), z=float(p[2])))
-            arrow.points.append(Point(
-                x=float(p[0] + ux*L), y=float(p[1] + uy*L), z=float(p[2] + uz*L)))
-            arrow.scale.x = 0.012   # shaft dia
-            arrow.scale.y = 0.025   # head dia
-            arrow.scale.z = 0.04    # head len
-            arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = 1.0, 0.4, 0.0, 1.0
-            out.append(arrow)
+        L = float(self.get_parameter('arrow_length').value)
+        arrow = self._hdr(Marker())
+        arrow.ns = "pose_dir"
+        arrow.id = 0
+        arrow.type = Marker.ARROW
+        arrow.action = Marker.ADD
+        arrow.pose.orientation.w = 1.0
+        arrow.points.append(
+            Point(x=float(cp[0]), y=float(cp[1]), z=float(cp[2])))
+        arrow.points.append(Point(
+            x=float(cp[0] + ux * L), y=float(cp[1] + uy * L),
+            z=float(cp[2])))
+        arrow.scale.x = 0.012   # shaft dia
+        arrow.scale.y = 0.025   # head dia
+        arrow.scale.z = 0.04    # head len
+        arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = 1.0, 0.4, 0.0, 1.0
+        out.append(arrow)
 
         label = self.create_text_marker(
-            [float(p[0]), float(p[1]), float(p[2]) + 0.02],
-            f'p_start ({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f})\n'
-            f'v_dir ({d[0]:.2f}, {d[1]:.2f}, {d[2]:.2f})',
+            [float(cp[0]), float(cp[1]), float(cp[2]) + 0.02],
+            f'cp = L1_M ({cp[0]:.3f}, {cp[1]:.3f}, {cp[2]:.3f})\n'
+            f'degree {deg:.1f}°',
             0, ns="pose_text")
         out.append(label)
         return out
@@ -370,10 +407,9 @@ class CupOccupancyNode(Node):
         # 1) 위치/방향 마커 (상시)
         ma.markers.extend(self._pose_markers())
 
-        # 2) 타겟 경계 — virtual_counts 피라미드 (상시, 검출 없어도 표시)
-        counts = list(self.get_parameter('virtual_counts').value)
-        for layer_idx, n in enumerate(counts):
-            for pos_i in range(int(n)):
+        # 2) 타겟 경계 — 고정 LAYER_COUNTS 피라미드 (상시, 검출 없어도 표시)
+        for layer_idx, n in enumerate(LAYER_COUNTS):
+            for pos_i in range(n):
                 v_min, v_max = self.get_virtual_box(pos_i, layer_idx)
                 ma.markers.append(self._boundary_outline_marker(
                     v_min, v_max, layer_idx * 100 + pos_i))
