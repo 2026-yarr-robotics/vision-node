@@ -1,0 +1,17 @@
+# colcon / ament build outputs
+build/
+install/
+log/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/

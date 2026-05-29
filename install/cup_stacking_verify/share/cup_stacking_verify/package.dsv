@@ -1,6 +1,0 @@
-source;share/cup_stacking_verify/hook/pythonpath.ps1
-source;share/cup_stacking_verify/hook/pythonpath.dsv
-source;share/cup_stacking_verify/hook/pythonpath.sh
-source;share/cup_stacking_verify/hook/ament_prefix_path.ps1
-source;share/cup_stacking_verify/hook/ament_prefix_path.dsv
-source;share/cup_stacking_verify/hook/ament_prefix_path.sh
