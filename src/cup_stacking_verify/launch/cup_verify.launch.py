@@ -66,6 +66,9 @@ def generate_launch_description() -> LaunchDescription:
     verifier = Node(
         package='cup_stacking_verify', executable='verifier',
         name='cup_occupancy_verifier', output='screen',
+        # /stack namespaced so the integration aggregator_node sits in front of
+        # GSP. /stack_track_ids stays as-is (plan_executor consumes it directly).
+        remappings=[('/stack', '/vision/stack')],
         parameters=[{
             'target_frame': target_frame,
             'threshold': threshold,
