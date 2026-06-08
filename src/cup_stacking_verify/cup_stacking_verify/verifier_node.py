@@ -46,11 +46,15 @@ class CupOccupancyNode(Node):
         super().__init__('cup_occupancy_verifier')
 
         # 1. 스펙 및 파라미터
-        self.cup_ref_w = 0.070
+        # 가로 간격/층 높이를 FastAPI RobotDomain pyramid 배치 기하에 맞춤
+        # (server/server/domains/robot.py: PYRAMID_CUP_SPACING=0.078,
+        #  PYRAMID_LAYER_HEIGHT=0.093). cup_ref_w 가 슬롯 가로 간격이자 박스 폭,
+        #  층 수직 피치 = cup_ref_h + layer_gap = 0.086 + 0.007 = 0.093.
+        self.cup_ref_w = 0.078    # = PYRAMID_CUP_SPACING (슬롯 가로 간격, base+X)
         self.cup_ref_d = 0.070
         self.cup_ref_h = 0.086
         self.cup_ref_vol = self.cup_ref_w * self.cup_ref_d * self.cup_ref_h
-        self.layer_gap  = 0.002   # 레이어 간 수직 간격 (m)
+        self.layer_gap  = 0.007   # 층 피치 0.093 = cup_ref_h(0.086)+layer_gap
         self.box_margin = 0.010   # 박스 시각화 여백 — 인접 컵 사이 간격 표현 (m)
 
         # New geometry: cp = L1_M position (centre of the bottom layer),
@@ -58,7 +62,9 @@ class CupOccupancyNode(Node):
         # around base +Z).  Replaces the old p_start (L1_L) + v_dir (3D unit)
         # pair so the pose can be set with the same convention the API uses.
         self.declare_parameter('cp', [0.5, 0.0, 0.1])
-        self.declare_parameter('degree', 0.0)
+        # 기본 90° = FastAPI RobotDomain DEFAULT_PYRAMID_DEGREE 와 일치
+        # (행을 base +Y 로 펼침). 0° 이면 +X 라 Pyramid API 와 90° 어긋남.
+        self.declare_parameter('degree', 90.0)
         self.declare_parameter('threshold', 0.6)
         self.declare_parameter('target_index', 0)
         # Frame for all RViz markers. depth_digital_twin bridges detections in
