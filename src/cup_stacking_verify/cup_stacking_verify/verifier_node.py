@@ -1,8 +1,12 @@
 import json
 import math
+import threading
+import time
+import urllib.request
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from std_msgs.msg import Float32, Int8, Int32MultiArray, String
 from geometry_msgs.msg import Point
 from vision_msgs.msg import Detection3DArray
@@ -102,7 +106,14 @@ class CupOccupancyNode(Node):
         # Slot occupancy threshold (separate from `threshold` which gates the
         # overall Int8 status). Default lower so partial fits still register.
         self.declare_parameter('slot_occupancy_overlap_min', 0.4)
+        # In-flight transient 억제: 슬롯이 같은 track id 로 ratio>=overlap_min 을
+        # slot_confirm_frames 연속(관측 간격 <= slot_confirm_timeout_s) 유지할 때만
+        # /stack 에 occupied 로 반영(공중 컵의 일시 L2/L3 오검출 방지). 사라짐은 즉시
+        # 반영(외란/유실 빠르게). frames=1 이면 즉시(기존 동작, replay 테스트용).
+        self.declare_parameter('slot_confirm_frames', 3)
+        self.declare_parameter('slot_confirm_timeout_s', 0.5)
         self._stack_slot_keys = _build_slot_keys(LAYER_COUNTS)
+        self._slot_streak = {}  # slot_key -> {tid, count, last_t}
 
         # Latest detections, rendered by the timer (decoupled from arrival rate
         # so the boundary/pose markers are published even with no detections).
@@ -112,9 +123,70 @@ class CupOccupancyNode(Node):
         rate = max(1.0, float(self.get_parameter('publish_rate_hz').value))
         self.create_timer(1.0 / rate, self._render)
 
+        # ── Runtime geometry sync: keep cp/degree == FastAPI pyramid config ──
+        # The slot boxes are anchored at cp (= L1_M) with rotation degree; the
+        # robot's actual placement geometry is owned by the FastAPI server
+        # (GET /api/robot/config/pyramid → center{x,y} + degree). If they drift
+        # the placed cup falls outside the slot box and /stack never flips to
+        # occupied, stalling the LLM loop. A background poller (order- and
+        # boot-timing-independent, unlike a launch-time fetch) tracks the API
+        # value and self-heals once the server is up.
+        self.declare_parameter('sync_pyramid_geometry', False)
+        self.declare_parameter(
+            'pyramid_config_url',
+            'https://yarr-api-31.simplyimg.com/api/robot/config/pyramid')
+        self.declare_parameter('sync_poll_period_s', 5.0)
+        # cp_z = perceived L1 cup-top height in world frame (NOT the API gripper
+        # place_z). The poll only overwrites cp.x/cp.y + degree, keeping this z.
+        self.declare_parameter('cp_z', float(self.get_parameter('cp').value[2]))
+        if bool(self.get_parameter('sync_pyramid_geometry').value):
+            url = str(self.get_parameter('pyramid_config_url').value)
+            period = max(1.0, float(self.get_parameter('sync_poll_period_s').value))
+            cp_z = float(self.get_parameter('cp_z').value)
+            if url:
+                threading.Thread(
+                    target=self._geometry_sync_loop,
+                    args=(url, period, cp_z), daemon=True).start()
+                self.get_logger().info(
+                    f'[geometry-sync] polling {url} every {period:.0f}s')
+
         self.get_logger().info(
             "Verifier started — boundary/pose markers always published "
             f"@ {rate:.0f} Hz (frame={self.frame_id})")
+
+    def _geometry_sync_loop(self, url: str, period: float, cp_z: float) -> None:
+        """Background: poll the FastAPI pyramid config and mirror center/degree
+        into this node's cp/degree params so slots track where cups are placed.
+
+        Runs off the executor thread; HTTP never blocks rendering. Only re-sets
+        params when the value changes (so a manual pose_tuner tweak isn't fought
+        every tick unless the API differs). Cloudflare 403s the default urllib
+        User-Agent, so present a curl-like one."""
+        req = urllib.request.Request(url, headers={'User-Agent': 'curl/7.81.0'})
+        last = None
+        while rclpy.ok():
+            try:
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    data = json.loads(resp.read())
+                cx = float(data['center']['x'])
+                cy = float(data['center']['y'])
+                deg = float(data['degree'])
+                key = (round(cx, 4), round(cy, 4), round(deg, 2))
+                if key != last:
+                    self.set_parameters([
+                        Parameter('cp', Parameter.Type.DOUBLE_ARRAY,
+                                  [cx, cy, cp_z]),
+                        Parameter('degree', Parameter.Type.DOUBLE, deg),
+                    ])
+                    self.get_logger().info(
+                        f'[geometry-sync] cp=[{cx:.3f},{cy:.3f},{cp_z:.3f}] '
+                        f'degree={deg:.1f}')
+                    last = key
+            except Exception as exc:  # noqa: BLE001 — unreachable/parse → retry
+                self.get_logger().warn(
+                    f'[geometry-sync] fetch failed: {exc}',
+                    throttle_duration_sec=15.0)
+            time.sleep(period)
 
     # ── 가상 박스 기하 ─────────────────────────────────────────────────────
     def get_virtual_box(self, index: int, layer: int = 0):
@@ -156,57 +228,103 @@ class CupOccupancyNode(Node):
         dz = max(0, min(v_max[2], d_max[2]) - max(v_min[2], d_min[2]))
         return (dx * dy * dz) / self.cup_ref_vol
 
-    def _compute_layers(self, msg, threshold):
-        """검출을 레이어로 묶고 가상 박스와 overlap 계산.
+    def _compute_slots(self, msg, threshold):
+        """고정 6슬롯 각각에 가장 많이 겹치는 detection을 greedy(ratio 내림차순)로
+        배정한다.
 
-        Pyramid layout is fixed by LAYER_COUNTS=(3,2,1).  Detections that fall
-        outside the layout — extra layers above L3, or extra cups beyond each
-        layer's slot count — are intentionally DROPPED here so downstream
-        consumers (slot dict, RViz overlay, /stack) only ever see at most
-        3+2+1 = 6 records.
+        기존 z-layer 그룹핑 → x정렬 → 레이어별 cap 방식은 주변 테이블 컵이 x순위로
+        앞서면 실제로 슬롯에 놓인 컵을 엉뚱한 박스에 대입하거나 cap에 걸려 drop시켜,
+        놓인 컵이 있어도 /stack이 occupied로 바뀌지 않는 구조적 실패가 있었다.
+        여기서는 LAYER_COUNTS=(3,2,1)의 6개 고정 슬롯마다 모든 detection과 3D
+        overlap을 계산하고, ratio가 큰 순서로 슬롯·detection을 각각 한 번씩만
+        배정한다(상호배제). 화면에 테이블 컵이 몇 개 있든 각 슬롯은 자신과 실제로
+        가장 많이 겹치는 컵만 가져간다.
 
-        Returns (records, max_ratio, layer_sizes).  `layer_sizes` reports the
-        OBSERVED per-layer counts before capping, useful for logging.
+        Returns (records, max_ratio, slot_debug):
+          records   — 배정된 슬롯별 dict(스키마: layer/pos/detection/v_min/v_max/
+                      ratio/occupied). occupied 는 marker용 threshold(0.6).
+          max_ratio — 배정된 슬롯 중 최대 overlap.
+          slot_debug — slot_key -> (detection|None, ratio). 미점유 포함 로그용.
         """
-        z_tol = self.cup_ref_h / 2
-        layers = []  # 같은 레이어의 detection 목록
-        for detection in msg.detections:
-            z = detection.bbox.center.position.z
-            placed = False
-            for group in layers:
-                if abs(group[0].bbox.center.position.z - z) < z_tol:
-                    group.append(detection)
-                    placed = True
-                    break
-            if not placed:
-                layers.append([detection])
+        dets = []
+        for det in msg.detections:
+            pos = det.bbox.center.position
+            size = det.bbox.size
+            d_min = [pos.x - size.x/2, pos.y - size.y/2, pos.z - size.z]
+            d_max = [pos.x + size.x/2, pos.y + size.y/2, pos.z]
+            dets.append((det, d_min, d_max))
 
-        layers.sort(key=lambda g: g[0].bbox.center.position.z)  # bottom→top
-        observed_sizes = [len(g) for g in layers]
+        slots = []  # (layer_idx, pos_i, slot_key, v_min, v_max)
+        for layer_idx, count in enumerate(LAYER_COUNTS):
+            for pos_i in range(count):
+                v_min, v_max = self.get_virtual_box(pos_i, layer_idx)
+                slots.append((layer_idx, pos_i,
+                              _slot_name(layer_idx + 1, pos_i, count),
+                              v_min, v_max))
+
+        candidates = []  # (ratio, slot_index, det_index), overlap>0 only
+        raw_best = {}    # slot_index -> (ratio, det_index): per-slot max, pre-greedy
+        for si, (_li, _pi, _sk, v_min, v_max) in enumerate(slots):
+            for di, (_det, d_min, d_max) in enumerate(dets):
+                ratio = self.calculate_overlap_ratio(v_min, v_max, d_min, d_max)
+                if ratio > 0.0:
+                    candidates.append((ratio, si, di))
+                    if si not in raw_best or ratio > raw_best[si][0]:
+                        raw_best[si] = (ratio, di)
+        candidates.sort(key=lambda c: c[0], reverse=True)
+
+        used_slots = set()
+        used_dets = set()
+        best_by_slot = {}  # slot_index -> (ratio, det_index)
+        for ratio, si, di in candidates:
+            if si in used_slots or di in used_dets:
+                continue
+            used_slots.add(si)
+            used_dets.add(di)
+            best_by_slot[si] = (ratio, di)
 
         records = []
+        slot_debug = {}
         max_ratio = 0.0
-        for layer_idx, layer_cups in enumerate(layers):
-            if layer_idx >= len(LAYER_COUNTS):
-                break                                  # cap at 3 tiers
-            slot_count = LAYER_COUNTS[layer_idx]
-            layer_cups.sort(key=lambda d: d.bbox.center.position.x)
-            for pos_i, detection in enumerate(layer_cups):
-                if pos_i >= slot_count:
-                    break                              # cap per-layer slots
-                pos = detection.bbox.center.position
-                size = detection.bbox.size
-                d_min = [pos.x - size.x/2, pos.y - size.y/2, pos.z - size.z]
-                d_max = [pos.x + size.x/2, pos.y + size.y/2, pos.z]
-                v_min, v_max = self.get_virtual_box(pos_i, layer_idx)
-                ratio = self.calculate_overlap_ratio(v_min, v_max, d_min, d_max)
-                max_ratio = max(max_ratio, ratio)
-                records.append({
-                    'layer': layer_idx, 'pos': pos_i, 'detection': detection,
-                    'v_min': v_min, 'v_max': v_max, 'ratio': ratio,
-                    'occupied': ratio > threshold,
-                })
-        return records, max_ratio, observed_sizes
+        for si, (layer_idx, pos_i, slot_key, v_min, v_max) in enumerate(slots):
+            rb = raw_best.get(si)
+            raw_det = dets[rb[1]][0] if rb else None
+            raw_ratio = rb[0] if rb else 0.0
+            assigned = best_by_slot.get(si)
+            assigned_ratio = assigned[0] if assigned else 0.0
+            slot_debug[slot_key] = (raw_det, raw_ratio, assigned_ratio)
+            if assigned is None:
+                continue
+            ratio, di = assigned
+            det = dets[di][0]
+            max_ratio = max(max_ratio, ratio)
+            records.append({
+                'layer': layer_idx, 'pos': pos_i, 'detection': det,
+                'v_min': v_min, 'v_max': v_max, 'ratio': ratio,
+                'occupied': ratio > threshold,
+            })
+        return records, max_ratio, slot_debug
+
+    def _log_slot_debug(self, slot_debug: dict) -> None:
+        """슬롯별 best detection/ratio를 throttle 걸어 한 줄로 남긴다.
+        assigned 기준은 /stack 임계(slot_occupancy_overlap_min, 기본 0.4)."""
+        min_overlap = float(
+            self.get_parameter('slot_occupancy_overlap_min').value)
+        parts = []
+        for slot_key in self._stack_slot_keys:
+            raw_det, raw_ratio, assigned_ratio = slot_debug.get(
+                slot_key, (None, 0.0, 0.0))
+            if raw_det is None:
+                parts.append(f'{slot_key}=None(0.00,no)')
+                continue
+            try:
+                did = int(raw_det.id)
+            except (ValueError, TypeError):
+                did = raw_det.id
+            ok = 'yes' if assigned_ratio >= min_overlap else 'no'
+            parts.append(f'{slot_key}=#{did}({raw_ratio:.2f},{ok})')
+        self.get_logger().info(
+            'slot match | ' + '  '.join(parts), throttle_duration_sec=2.0)
 
     # ── 콜백: status/ratio 즉시 발행, 마커는 타이머가 렌더 ──────────────────
     def detection_callback(self, msg):
@@ -214,13 +332,11 @@ class CupOccupancyNode(Node):
         self._last_stamp_s = self.get_clock().now().nanoseconds * 1e-9
 
         threshold = self.get_parameter('threshold').value
-        records, max_ratio, layer_sizes = self._compute_layers(msg, threshold)
-        for r in records:
-            self.pub_status.publish(Int8(data=1 if r['occupied'] else 0))
+        records, max_ratio, slot_debug = self._compute_slots(msg, threshold)
+        self.pub_status.publish(Int8(data=1 if max_ratio > threshold else 0))
         self.pub_ratio.publish(Float32(data=max_ratio))
         self._publish_stack(records)
-        self.get_logger().info(
-            f'Layers detected: {layer_sizes} | Max overlap: {max_ratio:.2f}')
+        self._log_slot_debug(slot_debug)
 
     # ── /stack + /stack_track_ids 발행 ────────────────────────────────────
     def _publish_stack(self, records: list[dict]) -> None:
@@ -229,15 +345,19 @@ class CupOccupancyNode(Node):
         Slot keys are the fixed LAYER_COUNTS layout, so the emitted schema is
         constant — empty slots stay `null`.  A record contributes only when
         its overlap clears `slot_occupancy_overlap_min` (default 0.4).
-        `_compute_layers` has already capped records to the layout, but we
+        `_compute_slots` returns at most one record per slot, but we
         re-check the bounds defensively here.
         """
         min_overlap = float(
             self.get_parameter('slot_occupancy_overlap_min').value)
-        slot_map: dict[str, str | None] = {
-            k: None for k in self._stack_slot_keys}
-        track_ids: list[int] = []
+        confirm_frames = int(
+            self.get_parameter('slot_confirm_frames').value)
+        confirm_timeout = float(
+            self.get_parameter('slot_confirm_timeout_s').value)
+        now = self.get_clock().now().nanoseconds * 1e-9
 
+        # 이번 프레임에 overlap_min 이상으로 채워진 슬롯 후보(confirm 전 raw).
+        raw_occupied: dict[str, tuple] = {}
         for r in records:
             if r['ratio'] < min_overlap:
                 continue
@@ -248,11 +368,35 @@ class CupOccupancyNode(Node):
             if pos_i >= vcount:
                 continue
             slot = _slot_name(layer_idx + 1, pos_i, vcount)
-            slot_map[slot] = self._color_of(r['detection'])
             try:
-                track_ids.append(int(r['detection'].id))
+                tid = int(r['detection'].id)
             except (ValueError, TypeError):
-                pass
+                tid = -1
+            raw_occupied[slot] = (self._color_of(r['detection']), tid)
+
+        # N-frame confirm: 등장은 같은 track id 가 confirm_frames 연속 유지될 때만,
+        # 사라짐은 즉시(streak drop).
+        slot_map: dict[str, str | None] = {
+            k: None for k in self._stack_slot_keys}
+        track_ids: list[int] = []
+        for slot in self._stack_slot_keys:
+            cand = raw_occupied.get(slot)
+            if cand is None:
+                self._slot_streak.pop(slot, None)
+                continue
+            color, tid = cand
+            st = self._slot_streak.get(slot)
+            if (st is not None and st['tid'] == tid
+                    and now - st['last_t'] <= confirm_timeout):
+                st['count'] += 1
+                st['last_t'] = now
+            else:
+                st = {'tid': tid, 'count': 1, 'last_t': now}
+                self._slot_streak[slot] = st
+            if st['count'] >= confirm_frames:
+                slot_map[slot] = color
+                if tid >= 0:
+                    track_ids.append(tid)
 
         self.pub_stack.publish(
             String(data=json.dumps(slot_map, ensure_ascii=False)))
@@ -432,7 +576,7 @@ class CupOccupancyNode(Node):
             self._publish_stack([])
         if fresh:
             threshold = self.get_parameter('threshold').value
-            records, _, _ = self._compute_layers(self._last_msg, threshold)
+            records, _, _ = self._compute_slots(self._last_msg, threshold)
             for r in records:
                 idx = r['pos'] + r['layer'] * 100
                 ma.markers.append(self.create_marker(
