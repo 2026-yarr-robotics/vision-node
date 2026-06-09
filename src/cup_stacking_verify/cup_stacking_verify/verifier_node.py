@@ -81,7 +81,7 @@ class CupOccupancyNode(Node):
         # is fixed by LAYER_COUNTS at module scope and NOT parameterisable.
         self.declare_parameter('publish_rate_hz', 10.0)
         # Detected-cup overlay is shown only while detections are this fresh.
-        self.declare_parameter('detection_timeout_s', 1.5)
+        self.declare_parameter('detection_timeout_s', 2.5)
         # Length of the degree-direction arrow marker (m, in base XY plane).
         self.declare_parameter('arrow_length', 0.25)
 
@@ -106,14 +106,22 @@ class CupOccupancyNode(Node):
         # Slot occupancy threshold (separate from `threshold` which gates the
         # overall Int8 status). Default lower so partial fits still register.
         self.declare_parameter('slot_occupancy_overlap_min', 0.4)
-        # In-flight transient 억제: 슬롯이 같은 track id 로 ratio>=overlap_min 을
-        # slot_confirm_frames 연속(관측 간격 <= slot_confirm_timeout_s) 유지할 때만
-        # /stack 에 occupied 로 반영(공중 컵의 일시 L2/L3 오검출 방지). 사라짐은 즉시
-        # 반영(외란/유실 빠르게). frames=1 이면 즉시(기존 동작, replay 테스트용).
-        self.declare_parameter('slot_confirm_frames', 3)
-        self.declare_parameter('slot_confirm_timeout_s', 0.5)
+        # /stack 은 raw perception heartbeat 가 아니라 "confirmed world-state" 로
+        # 다룬다. 입력(/detected_cups)이 ~0.5Hz 로 느리고 가변이라 frame-count 게이트는
+        # 성립하지 않으므로, 시간 기반 confirm/release 히스테리시스를 쓴다.
+        #   confirm: 슬롯이 raw(ratio>=overlap_min) 로 confirm_on_s 이상 + 최소
+        #            confirm_min_observations 회(관측 간격<=confirm_max_gap_s) 관측되면 latch.
+        #   release: confirmed 슬롯이 release_off_s 이상 연속 미검출이면 해제(짧은
+        #            dropout 은 라이드아웃). release_max_age_s 는 confirm 못 된 stale
+        #            streak 정리용 backstop(confirmed 는 release_off_s 가 항상 먼저).
+        self.declare_parameter('confirm_on_s', 0.6)
+        self.declare_parameter('confirm_min_observations', 2)
+        self.declare_parameter('confirm_max_gap_s', 5.0)
+        self.declare_parameter('release_off_s', 2.0)
+        self.declare_parameter('release_max_age_s', 7.0)
         self._stack_slot_keys = _build_slot_keys(LAYER_COUNTS)
-        self._slot_streak = {}  # slot_key -> {tid, count, last_t}
+        # slot_key -> dict(present_since, obs_count, last_seen_t, color, tid, confirmed)
+        self._slot_state = {}
 
         # Latest detections, rendered by the timer (decoupled from arrival rate
         # so the boundary/pose markers are published even with no detections).
@@ -335,29 +343,22 @@ class CupOccupancyNode(Node):
         records, max_ratio, slot_debug = self._compute_slots(msg, threshold)
         self.pub_status.publish(Int8(data=1 if max_ratio > threshold else 0))
         self.pub_ratio.publish(Float32(data=max_ratio))
-        self._publish_stack(records)
+        now = self.get_clock().now().nanoseconds * 1e-9
+        self._ingest_stack_observation(records, now)
+        self._update_and_publish_stack(now)
         self._log_slot_debug(slot_debug)
 
     # ── /stack + /stack_track_ids 발행 ────────────────────────────────────
-    def _publish_stack(self, records: list[dict]) -> None:
-        """Publish /stack (JSON {slot: color|null}) and /stack_track_ids.
+    def _ingest_stack_observation(self, records, now):
+        """이번 프레임의 raw 점유 관측(ratio>=overlap_min)을 슬롯 상태에 누적.
 
-        Slot keys are the fixed LAYER_COUNTS layout, so the emitted schema is
-        constant — empty slots stay `null`.  A record contributes only when
-        its overlap clears `slot_occupancy_overlap_min` (default 0.4).
-        `_compute_slots` returns at most one record per slot, but we
-        re-check the bounds defensively here.
-        """
+        present_since/obs_count 로 confirm 누적을 추적하고 last_seen_t 로 release
+        나이를 잰다. confirm_max_gap_s 보다 긴 공백 뒤 관측은 새 streak 으로 본다."""
         min_overlap = float(
             self.get_parameter('slot_occupancy_overlap_min').value)
-        confirm_frames = int(
-            self.get_parameter('slot_confirm_frames').value)
-        confirm_timeout = float(
-            self.get_parameter('slot_confirm_timeout_s').value)
-        now = self.get_clock().now().nanoseconds * 1e-9
+        max_gap = float(self.get_parameter('confirm_max_gap_s').value)
 
-        # 이번 프레임에 overlap_min 이상으로 채워진 슬롯 후보(confirm 전 raw).
-        raw_occupied: dict[str, tuple] = {}
+        seen = {}
         for r in records:
             if r['ratio'] < min_overlap:
                 continue
@@ -372,31 +373,56 @@ class CupOccupancyNode(Node):
                 tid = int(r['detection'].id)
             except (ValueError, TypeError):
                 tid = -1
-            raw_occupied[slot] = (self._color_of(r['detection']), tid)
+            seen[slot] = (self._color_of(r['detection']), tid)
 
-        # N-frame confirm: 등장은 같은 track id 가 confirm_frames 연속 유지될 때만,
-        # 사라짐은 즉시(streak drop).
+        for slot, (color, tid) in seen.items():
+            st = self._slot_state.get(slot)
+            if st is None or (now - st['last_seen_t']) > max_gap:
+                st = {'present_since': now, 'obs_count': 0,
+                      'last_seen_t': now, 'color': color, 'tid': tid,
+                      'confirmed': st['confirmed'] if st else False}
+                self._slot_state[slot] = st
+            st['obs_count'] += 1
+            st['last_seen_t'] = now
+            st['color'] = color
+            st['tid'] = tid
+
+    def _update_and_publish_stack(self, now):
+        """시간 기반 confirm/release 로 latch 된 confirmed world-state 를 발행.
+
+        confirm: present_since~last_seen_t 가 confirm_on_s 이상 + obs_count 가
+                 confirm_min_observations 이상이면 latch. release: 마지막 관측이
+                 release_off_s 이상 지나면 해제(미confirm streak 은 release_max_age_s 로 정리).
+        raw detection freshness 로 /stack 을 직접 all-null 로 떨구지 않는다."""
+        confirm_on = float(self.get_parameter('confirm_on_s').value)
+        min_obs = int(self.get_parameter('confirm_min_observations').value)
+        release_off = float(self.get_parameter('release_off_s').value)
+        release_max_age = float(self.get_parameter('release_max_age_s').value)
+
         slot_map: dict[str, str | None] = {
             k: None for k in self._stack_slot_keys}
         track_ids: list[int] = []
         for slot in self._stack_slot_keys:
-            cand = raw_occupied.get(slot)
-            if cand is None:
-                self._slot_streak.pop(slot, None)
+            st = self._slot_state.get(slot)
+            if st is None:
                 continue
-            color, tid = cand
-            st = self._slot_streak.get(slot)
-            if (st is not None and st['tid'] == tid
-                    and now - st['last_t'] <= confirm_timeout):
-                st['count'] += 1
-                st['last_t'] = now
+            age = now - st['last_seen_t']
+            if st['confirmed']:
+                # confirmed: 충분히 오래 연속 미검출이면 해제(짧은 dropout 은 유지).
+                if age >= release_off:
+                    self._slot_state.pop(slot, None)
+                    continue
             else:
-                st = {'tid': tid, 'count': 1, 'last_t': now}
-                self._slot_streak[slot] = st
-            if st['count'] >= confirm_frames:
-                slot_map[slot] = color
-                if tid >= 0:
-                    track_ids.append(tid)
+                present_dur = st['last_seen_t'] - st['present_since']
+                if st['obs_count'] >= min_obs and present_dur >= confirm_on:
+                    st['confirmed'] = True
+                elif age >= release_max_age:
+                    self._slot_state.pop(slot, None)
+                    continue
+            if st['confirmed']:
+                slot_map[slot] = st['color']
+                if st['tid'] >= 0:
+                    track_ids.append(st['tid'])
 
         self.pub_stack.publish(
             String(data=json.dumps(slot_map, ensure_ascii=False)))
@@ -570,10 +596,9 @@ class CupOccupancyNode(Node):
         fresh = (self._last_msg is not None
                  and self._last_msg.detections
                  and now_s - self._last_stamp_s <= timeout)
-        # Heartbeat: when no fresh detection, still emit an all-null /stack so
-        # downstream consumers see a steady schema, not topic silence.
-        if not fresh:
-            self._publish_stack([])
+        # /stack 은 detection freshness 로 떨구지 않는다(confirmed world-state 를
+        # 시간 기반 release 로만 clear). 여기선 release 타이머 전진 + 재발행만.
+        self._update_and_publish_stack(now_s)
         if fresh:
             threshold = self.get_parameter('threshold').value
             records, _, _ = self._compute_slots(self._last_msg, threshold)

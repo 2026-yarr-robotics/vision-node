@@ -14,6 +14,21 @@ This launch adds, in a SEPARATE RViz window:
   pose_tuner_node           tkinter UI: live-edit p_start / v_dir
   rviz2                     vision-node window (cup_verify.rviz)
 
+Geometry sync (verifier slots ↔ FastAPI pyramid placement)
+----------------------------------------------------------
+The verifier judges a slot occupied by overlapping detected cups against
+virtual slot boxes anchored at `cp` (= L1_M centre) with row rotation `degree`.
+Those MUST match where the robot actually places cups, which the FastAPI server
+owns (GET /api/robot/config/pyramid → center{x,y} + degree). If they drift the
+placed cup falls outside the slot box, /stack never flips to occupied, and the
+LLM loop stalls waiting for the world update.
+
+So the verifier node POLLS that endpoint at runtime (sync_pyramid_geometry,
+pyramid_config_url, cp_z passed below) and mirrors center/degree into its own
+cp/degree. Runtime polling — not a launch-time fetch — so it is independent of
+process start order and self-heals once the FastAPI server (Docker) is up.
+Set sync_pyramid_geometry:=false to pin cp/degree to params instead.
+
 Run order (depth_digital_twin terminals 1-4 first), then:
 
   ros2 launch cup_stacking_verify cup_verify.launch.py
@@ -26,8 +41,11 @@ Args:
   target_frame     : marker / detection frame   (default: world)
   threshold        : occupancy overlap threshold (default: 0.6)
   use_test_pub     : true → run synthetic test_pub instead of the bridge
-                     (standalone testing without depth_digital_twin)
   tuner            : true|false — show the p_start/v_dir tuner UI (default: true)
+  sync_pyramid_geometry : true|false — verifier polls FastAPI for cp/degree (default: true)
+  pyramid_config_url    : GET endpoint for the pyramid config
+  cp_z             : perceived L1 cup-top height in world frame (default: 0.1)
+  sync_poll_period_s    : seconds between geometry polls (default: 5.0)
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -72,6 +90,11 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             'target_frame': target_frame,
             'threshold': threshold,
+            # Runtime geometry sync (verifier mirrors FastAPI pyramid center/degree).
+            'sync_pyramid_geometry': LaunchConfiguration('sync_pyramid_geometry'),
+            'pyramid_config_url': LaunchConfiguration('pyramid_config_url'),
+            'cp_z': LaunchConfiguration('cp_z'),
+            'sync_poll_period_s': LaunchConfiguration('sync_poll_period_s'),
         }])
 
     logger = Node(
@@ -104,6 +127,12 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('threshold', default_value='0.6'),
         DeclareLaunchArgument('use_test_pub', default_value='false'),
         DeclareLaunchArgument('tuner', default_value='true'),
+        DeclareLaunchArgument('sync_pyramid_geometry', default_value='true'),
+        DeclareLaunchArgument(
+            'pyramid_config_url',
+            default_value='http://localhost/api/robot/config/pyramid'),
+        DeclareLaunchArgument('cp_z', default_value='0.1'),
+        DeclareLaunchArgument('sync_poll_period_s', default_value='5.0'),
         bridge,
         test_pub,
         verifier,
