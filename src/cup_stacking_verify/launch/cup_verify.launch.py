@@ -39,12 +39,12 @@ Args:
   boxes_topic      : depth_digital_twin boxes   (default: /digital_twin/boxes)
   detections_topic : bridged Detection3DArray   (default: /detected_cups)
   target_frame     : marker / detection frame   (default: world)
-  threshold        : occupancy overlap threshold (default: 0.6)
+  threshold        : occupancy overlap threshold (default: 0.2)
   use_test_pub     : true → run synthetic test_pub instead of the bridge
   tuner            : true|false — show the p_start/v_dir tuner UI (default: true)
   sync_pyramid_geometry : true|false — verifier polls FastAPI for cp/degree (default: true)
   pyramid_config_url    : GET endpoint for the pyramid config
-  cp_z             : perceived L1 cup-top height in world frame (default: 0.1)
+  cp_z             : perceived L1 cup-top height in world frame (default: 0.14)
   sync_poll_period_s    : seconds between geometry polls (default: 5.0)
 """
 from launch import LaunchDescription
@@ -124,14 +124,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'detections_topic', default_value='/detected_cups'),
         DeclareLaunchArgument('target_frame', default_value='world'),
-        DeclareLaunchArgument('threshold', default_value='0.6'),
+        DeclareLaunchArgument('threshold', default_value='0.2'),
         DeclareLaunchArgument('use_test_pub', default_value='false'),
         DeclareLaunchArgument('tuner', default_value='true'),
         DeclareLaunchArgument('sync_pyramid_geometry', default_value='true'),
         DeclareLaunchArgument(
             'pyramid_config_url',
             default_value='http://localhost/api/robot/config/pyramid'),
-        DeclareLaunchArgument('cp_z', default_value='0.1'),
+        DeclareLaunchArgument('cp_z', default_value='0.14'),
         DeclareLaunchArgument('sync_poll_period_s', default_value='5.0'),
         bridge,
         test_pub,

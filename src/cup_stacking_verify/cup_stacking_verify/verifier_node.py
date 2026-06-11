@@ -69,7 +69,7 @@ class CupOccupancyNode(Node):
         # 기본 90° = FastAPI RobotDomain DEFAULT_PYRAMID_DEGREE 와 일치
         # (행을 base +Y 로 펼침). 0° 이면 +X 라 Pyramid API 와 90° 어긋남.
         self.declare_parameter('degree', 90.0)
-        self.declare_parameter('threshold', 0.6)
+        self.declare_parameter('threshold', 0.2)
         self.declare_parameter('target_index', 0)
         # Frame for all RViz markers. depth_digital_twin bridges detections in
         # `world` (= robot base), so default to `world` to keep this node's
@@ -105,7 +105,14 @@ class CupOccupancyNode(Node):
             Int32MultiArray, '/stack_track_ids', 10)
         # Slot occupancy threshold (separate from `threshold` which gates the
         # overall Int8 status). Default lower so partial fits still register.
-        self.declare_parameter('slot_occupancy_overlap_min', 0.4)
+        self.declare_parameter('slot_occupancy_overlap_min', 0.2)
+        self.declare_parameter("slot_top_z_tolerance_m", 0.04)
+        # Exo camera sees one-sided cup surfaces, so stack-area fixed
+        # boxes can be biased toward the camera by several cm. Repair
+        # slot occupancy by snapping same-layer detections by row order.
+        self.declare_parameter('row_order_slot_snap', True)
+        self.declare_parameter('row_order_xy_gate_m', 0.09)
+        self.declare_parameter('row_order_lateral_margin_m', 0.06)
         # /stack 은 raw perception heartbeat 가 아니라 "confirmed world-state" 로
         # 다룬다. 입력(/detected_cups)이 ~0.5Hz 로 느리고 가변이라 frame-count 게이트는
         # 성립하지 않으므로, 시간 기반 confirm/release 히스테리시스를 쓴다.
@@ -150,11 +157,10 @@ class CupOccupancyNode(Node):
         if bool(self.get_parameter('sync_pyramid_geometry').value):
             url = str(self.get_parameter('pyramid_config_url').value)
             period = max(1.0, float(self.get_parameter('sync_poll_period_s').value))
-            cp_z = float(self.get_parameter('cp_z').value)
             if url:
                 threading.Thread(
                     target=self._geometry_sync_loop,
-                    args=(url, period, cp_z), daemon=True).start()
+                    args=(url, period), daemon=True).start()
                 self.get_logger().info(
                     f'[geometry-sync] polling {url} every {period:.0f}s')
 
@@ -162,7 +168,7 @@ class CupOccupancyNode(Node):
             "Verifier started — boundary/pose markers always published "
             f"@ {rate:.0f} Hz (frame={self.frame_id})")
 
-    def _geometry_sync_loop(self, url: str, period: float, cp_z: float) -> None:
+    def _geometry_sync_loop(self, url: str, period: float) -> None:
         """Background: poll the FastAPI pyramid config and mirror center/degree
         into this node's cp/degree params so slots track where cups are placed.
 
@@ -179,7 +185,8 @@ class CupOccupancyNode(Node):
                 cx = float(data['center']['x'])
                 cy = float(data['center']['y'])
                 deg = float(data['degree'])
-                key = (round(cx, 4), round(cy, 4), round(deg, 2))
+                cp_z = float(self.get_parameter('cp_z').value)
+                key = (round(cx, 4), round(cy, 4), round(cp_z, 4), round(deg, 2))
                 if key != last:
                     self.set_parameters([
                         Parameter('cp', Parameter.Type.DOUBLE_ARRAY,
@@ -250,7 +257,7 @@ class CupOccupancyNode(Node):
 
         Returns (records, max_ratio, slot_debug):
           records   — 배정된 슬롯별 dict(스키마: layer/pos/detection/v_min/v_max/
-                      ratio/occupied). occupied 는 marker용 threshold(0.6).
+                      ratio/occupied). occupied 는 marker용 threshold(0.2).
           max_ratio — 배정된 슬롯 중 최대 overlap.
           slot_debug — slot_key -> (detection|None, ratio). 미점유 포함 로그용.
         """
@@ -272,8 +279,12 @@ class CupOccupancyNode(Node):
 
         candidates = []  # (ratio, slot_index, det_index), overlap>0 only
         raw_best = {}    # slot_index -> (ratio, det_index): per-slot max, pre-greedy
+        z_tol = max(0.0, float(
+            self.get_parameter("slot_top_z_tolerance_m").value))
         for si, (_li, _pi, _sk, v_min, v_max) in enumerate(slots):
             for di, (_det, d_min, d_max) in enumerate(dets):
+                if z_tol > 0.0 and abs(d_max[2] - v_max[2]) > z_tol:
+                    continue
                 ratio = self.calculate_overlap_ratio(v_min, v_max, d_min, d_max)
                 if ratio > 0.0:
                     candidates.append((ratio, si, di))
@@ -290,6 +301,9 @@ class CupOccupancyNode(Node):
             used_slots.add(si)
             used_dets.add(di)
             best_by_slot[si] = (ratio, di)
+
+        if bool(self.get_parameter('row_order_slot_snap').value):
+            self._apply_row_order_snap(slots, dets, best_by_slot, raw_best, z_tol)
 
         records = []
         slot_debug = {}
@@ -313,9 +327,95 @@ class CupOccupancyNode(Node):
             })
         return records, max_ratio, slot_debug
 
+    def _apply_row_order_snap(self, slots, dets, best_by_slot, raw_best, z_tol):
+        """Repair exo-view XY bias inside the known pyramid stack area.
+
+        The exo camera observes a one-sided cup surface, so fixed-box centers can
+        shift toward the camera. Slot occupancy is a discrete layout question;
+        when a layer has enough detections in the stack row corridor, assign them
+        by their lateral order along the pyramid row instead of requiring precise
+        box/slot overlap.
+        """
+        cp = self.get_parameter('cp').value
+        deg = float(self.get_parameter('degree').value)
+        theta = math.radians(deg)
+        ux, uy = math.cos(theta), math.sin(theta)
+        vx, vy = -uy, ux
+        xy_gate = max(0.0, float(
+            self.get_parameter('row_order_xy_gate_m').value))
+        lateral_margin = max(0.0, float(
+            self.get_parameter('row_order_lateral_margin_m').value))
+        min_overlap = float(self.get_parameter(
+            'slot_occupancy_overlap_min').value)
+
+        for layer_idx, count in enumerate(LAYER_COUNTS):
+            layer_slots = [
+                (si, pos_i, slot_key, v_min, v_max)
+                for si, (li, pos_i, slot_key, v_min, v_max) in enumerate(slots)
+                if li == layer_idx
+            ]
+            if not layer_slots:
+                continue
+            expected_s = [
+                (pos_i - (count - 1) / 2.0) * self.cup_ref_w
+                for _si, pos_i, _slot_key, _v_min, _v_max in layer_slots
+            ]
+            max_abs_s = max(abs(s) for s in expected_s) + lateral_margin
+            top_z = layer_slots[0][4][2]
+
+            layer_candidates = []
+            for di, (det, _d_min, d_max) in enumerate(dets):
+                pos = det.bbox.center.position
+                dx = float(pos.x) - float(cp[0])
+                dy = float(pos.y) - float(cp[1])
+                s = dx * ux + dy * uy
+                off_row = abs(dx * vx + dy * vy)
+                if off_row > xy_gate or abs(s) > max_abs_s:
+                    continue
+                if z_tol > 0.0 and abs(d_max[2] - top_z) > z_tol:
+                    continue
+                layer_candidates.append((s, off_row, di))
+
+            if len(layer_candidates) < count:
+                continue
+            layer_candidates.sort(key=lambda item: item[0])
+
+            best_cost = None
+            best_combo = None
+            n = len(layer_candidates)
+            if count == 1:
+                combos = [(a,) for a in layer_candidates]
+            elif count == 2:
+                combos = [
+                    (layer_candidates[i], layer_candidates[j])
+                    for i in range(n) for j in range(i + 1, n)
+                ]
+            else:
+                combos = [
+                    (layer_candidates[i], layer_candidates[j], layer_candidates[k])
+                    for i in range(n) for j in range(i + 1, n)
+                    for k in range(j + 1, n)
+                ]
+            for combo in combos:
+                cost = sum(
+                    abs(combo[i][0] - expected_s[i]) + 0.25 * combo[i][1]
+                    for i in range(count)
+                )
+                if best_cost is None or cost < best_cost:
+                    best_cost = cost
+                    best_combo = combo
+            if best_combo is None:
+                continue
+
+            for (si, _pos_i, _slot_key, _v_min, _v_max), (_s, _off, di) in zip(
+                    layer_slots, best_combo):
+                ratio = max(raw_best.get(si, (0.0, di))[0], min_overlap + 1e-3)
+                raw_best[si] = (ratio, di)
+                best_by_slot[si] = (ratio, di)
+
     def _log_slot_debug(self, slot_debug: dict) -> None:
         """슬롯별 best detection/ratio를 throttle 걸어 한 줄로 남긴다.
-        assigned 기준은 /stack 임계(slot_occupancy_overlap_min, 기본 0.4)."""
+        assigned 기준은 /stack 임계(slot_occupancy_overlap_min, 기본 0.2)."""
         min_overlap = float(
             self.get_parameter('slot_occupancy_overlap_min').value)
         parts = []
