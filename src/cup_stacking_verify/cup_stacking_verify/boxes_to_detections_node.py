@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import re
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
@@ -184,7 +185,9 @@ def _parse_color(text: str) -> str | None:
     after the track id when depth has classified it)."""
     if not text:
         return None
-    for tok in text.replace('\n', '_').split('_'):
+    # Tolerant: legacy underscore labels AND label v2
+    # `[F] [S] #7 red cup(0.305, 0.400, 0.075)` (space-separated).
+    for tok in re.split(r'[\s_]+', text.replace('\n', ' ')):
         t = tok.strip().lower()
         if t in _KNOWN_COLORS:
             return t
