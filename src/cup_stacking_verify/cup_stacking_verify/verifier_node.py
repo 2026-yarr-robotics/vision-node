@@ -65,7 +65,7 @@ class CupOccupancyNode(Node):
         # degree = row orientation in degrees (base +X = 0°, CCW positive
         # around base +Z).  Replaces the old p_start (L1_L) + v_dir (3D unit)
         # pair so the pose can be set with the same convention the API uses.
-        self.declare_parameter('cp', [0.5, 0.0, 0.1])
+        self.declare_parameter('cp', [0.450, 0.0, 0.1])
         # 기본 90° = FastAPI RobotDomain DEFAULT_PYRAMID_DEGREE 와 일치
         # (행을 base +Y 로 펼침). 0° 이면 +X 라 Pyramid API 와 90° 어긋남.
         self.declare_parameter('degree', 90.0)
