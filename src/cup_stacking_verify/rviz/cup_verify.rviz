@@ -198,7 +198,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /upright_cup/debug_image
+        Value: /digital_twin/detection_debug
       Value: true
   Enabled: true
   Global Options:
