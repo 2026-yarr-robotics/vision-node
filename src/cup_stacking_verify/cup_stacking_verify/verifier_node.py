@@ -124,7 +124,7 @@ class CupOccupancyNode(Node):
         self.declare_parameter('confirm_on_s', 0.6)
         self.declare_parameter('confirm_min_observations', 2)
         self.declare_parameter('confirm_max_gap_s', 5.0)
-        self.declare_parameter('release_off_s', 2.0)
+        self.declare_parameter('release_off_s', 5.0)
         self.declare_parameter('release_max_age_s', 7.0)
         self._stack_slot_keys = _build_slot_keys(LAYER_COUNTS)
         # slot_key -> dict(present_since, obs_count, last_seen_t, color, tid, confirmed)
@@ -478,14 +478,24 @@ class CupOccupancyNode(Node):
         for slot, (color, tid) in seen.items():
             st = self._slot_state.get(slot)
             if st is None or (now - st['last_seen_t']) > max_gap:
+                # New streak (first sight, or after a >max_gap gap = a different
+                # cup) → reset the color votes so a replaced cup re-latches its
+                # own color from scratch.
                 st = {'present_since': now, 'obs_count': 0,
                       'last_seen_t': now, 'color': color, 'tid': tid,
-                      'confirmed': st['confirmed'] if st else False}
+                      'color_votes': {}, 'confirmed': st['confirmed'] if st else False}
                 self._slot_state[slot] = st
             st['obs_count'] += 1
             st['last_seen_t'] = now
-            st['color'] = color
             st['tid'] = tid
+            # LATCH the slot color by majority vote over the streak instead of
+            # overwriting every frame: a single HSV misclassification (red↔orange,
+            # blue↔purple at the bucket boundaries) can't flip the reported color
+            # once the true color leads. A replaced cup resets votes via the new
+            # streak above (occupancy empties → re-confirms).
+            votes = st.setdefault('color_votes', {})
+            votes[color] = votes.get(color, 0) + 1
+            st['color'] = self._latched_color(votes)
 
     def _update_and_publish_stack(self, now):
         """시간 기반 confirm/release 로 latch 된 confirmed world-state 를 발행.
@@ -539,6 +549,16 @@ class CupOccupancyNode(Node):
         except (AttributeError, IndexError):
             return 'unknown'
         return label or 'unknown'
+
+    @staticmethod
+    def _latched_color(votes: dict) -> str:
+        """Majority color over the streak's votes, PREFERRING a known color over
+        'unknown' so a few unlabeled frames can't beat a real color. Empty → 'unknown'."""
+        if not votes:
+            return 'unknown'
+        known = {c: n for c, n in votes.items() if c and c != 'unknown'}
+        pool = known or votes
+        return max(pool, key=pool.get)
 
     # ── 마커 빌더 ──────────────────────────────────────────────────────────
     def _hdr(self, marker):
