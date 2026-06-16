@@ -71,9 +71,14 @@ class CupOccupancyNode(Node):
         # shifted from base_link, so placed cups are *detected* ~+x/-y of their
         # API place coords; without this the cup lands at the slot box edge and
         # /stack flickers/misfires. +x,-y moves the boxes onto the detected
-        # cups. z is never offset (cp_z = perceived cup-top height). See _cp().
+        # cups. cp_offset_z raises every slot box in z (same nudge pattern as
+        # x/y): an empty slot's box sitting too low overlaps the table / a lower
+        # cup's detection and reads OCCUPIED, so a peeled/never-filled slot never
+        # flips back to null. A small +z lifts the boxes off that floor while a
+        # real cup (~cup_h tall) still overlaps. See _cp().
         self.declare_parameter('cp_offset_x', 0.0)
         self.declare_parameter('cp_offset_y', 0.0)
+        self.declare_parameter('cp_offset_z', 0.0)
         # 기본 90° = FastAPI RobotDomain DEFAULT_PYRAMID_DEGREE 와 일치
         # (행을 base +Y 로 펼침). 0° 이면 +X 라 Pyramid API 와 90° 어긋남.
         self.declare_parameter('degree', 90.0)
@@ -222,6 +227,7 @@ class CupOccupancyNode(Node):
         cp = list(self.get_parameter('cp').value)
         cp[0] = float(cp[0]) + float(self.get_parameter('cp_offset_x').value)
         cp[1] = float(cp[1]) + float(self.get_parameter('cp_offset_y').value)
+        cp[2] = float(cp[2]) + float(self.get_parameter('cp_offset_z').value)
         return cp
 
     # ── 가상 박스 기하 ─────────────────────────────────────────────────────
