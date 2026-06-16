@@ -7,8 +7,9 @@ Panels:
         - /PointCloud21
         - /MarkerArray2
         - /Image1
+        - /DepthCloud1/Auto Size1
       Splitter Ratio: 0.5
-    Tree Height: 205
+    Tree Height: 128
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -84,24 +85,24 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        exo_color_optical_frame:
-          world:
-            aruco:
-              {}
-            base_link:
-              link_1:
-                link_2:
-                  link_3:
-                    link_4:
-                      link_5:
-                        link_6:
-                          {}
         exo_link:
           exo_color_frame:
-            {}
+            exo_color_optical_frame:
+              {}
           exo_depth_frame:
             exo_depth_optical_frame:
               {}
+        world:
+          aruco:
+            {}
+          base_link:
+            link_1:
+              link_2:
+                link_3:
+                  link_4:
+                    link_5:
+                      link_6:
+                        {}
       Update Interval: 0
       Value: true
     - Class: rviz_default_plugins/MarkerArray
@@ -223,7 +224,7 @@ Visualization Manager:
         Value: /digital_twin/box_debug
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: false
+      Enabled: true
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -235,7 +236,75 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /upright_cup/debug_image
-      Value: false
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /digital_twin/box_debug
+      Value: true
+    - Alpha: 1
+      Auto Size:
+        Auto Size Factor: 1
+        Value: true
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      CameraInfo Topic: ""
+      Channel Name: intensity
+      Class: rviz_default_plugins/DepthCloud
+      Color: 255; 255; 255
+      Color Image Topic: ""
+      Color Transformer: ""
+      Color Transport Hint: raw
+      Decay Time: 0
+      Depth Map Topic: ""
+      Depth Map Transport Hint: raw
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: DepthCloud
+      Occlusion Compensation:
+        Occlusion Time-Out: 30
+        Value: false
+      Position Transformer: ""
+      Queue Size: 5
+      Reliability Policy: Best effort
+      Selectable: true
+      Size (Pixels): 3
+      Style: Flat Squares
+      Topic Filter: true
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /digital_twin/box_debug
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 30; 30; 30
@@ -252,7 +321,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 5.248661518096924
+      Distance: 3.1475977897644043
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -267,10 +336,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.39000004529953003
+      Pitch: 0.3200001120567322
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 0.034999750554561615
+      Yaw: 6.123193740844727
     Saved: ~
 Window Geometry:
   Displays:
@@ -280,7 +349,7 @@ Window Geometry:
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc0200000009fb000000100044006900730070006c006100790073010000003d00000150000000c900fffffffb0000000a005600690065007700730100000193000000f7000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000000000000000fb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d00610067006501000002900000014b0000002800fffffffb0000000a0049006d006100670065000000028f000000a70000000000000000fb0000000a0049006d0061006700650000000317000000c40000002800ffffff000001cc0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc020000000bfb000000100044006900730070006c006100790073010000003d00000103000000c900fffffffb0000000a005600690065007700730100000146000000bf000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000002800fffffffb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d006100670065010000020b000001000000002800fffffffb0000000a0049006d006100670065000000028f000000a70000002800fffffffb0000000a0049006d0061006700650000000317000000c40000000000000000fb0000000a0049006d0061006700650100000311000000ca0000000000000000fb0000000a0049006d0061006700650100000311000000ca0000002800ffffff000001cc0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 925
