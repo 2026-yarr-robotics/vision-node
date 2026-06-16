@@ -46,6 +46,8 @@ Args:
   pyramid_config_url    : GET endpoint for the pyramid config
   cp_z             : perceived L1 cup-top height in world frame (default: 0.14)
   sync_poll_period_s    : seconds between geometry polls (default: 5.0)
+  cp_offset_x/y    : static exo→base XY nudge added on top of cp so slot boxes
+                     land on the (offset) detected cups (default: 0.0)
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -95,6 +97,10 @@ def generate_launch_description() -> LaunchDescription:
             'pyramid_config_url': LaunchConfiguration('pyramid_config_url'),
             'cp_z': LaunchConfiguration('cp_z'),
             'sync_poll_period_s': LaunchConfiguration('sync_poll_period_s'),
+            # Static exo→base XY nudge added on top of the synced cp (the exo
+            # world frame is offset from base_link; placed cups read ~+x/-y).
+            'cp_offset_x': LaunchConfiguration('cp_offset_x'),
+            'cp_offset_y': LaunchConfiguration('cp_offset_y'),
         }])
 
     logger = Node(
@@ -133,6 +139,8 @@ def generate_launch_description() -> LaunchDescription:
             default_value='http://localhost/api/robot/config/pyramid'),
         DeclareLaunchArgument('cp_z', default_value='0.14'),
         DeclareLaunchArgument('sync_poll_period_s', default_value='5.0'),
+        DeclareLaunchArgument('cp_offset_x', default_value='0.0'),
+        DeclareLaunchArgument('cp_offset_y', default_value='0.0'),
         bridge,
         test_pub,
         verifier,

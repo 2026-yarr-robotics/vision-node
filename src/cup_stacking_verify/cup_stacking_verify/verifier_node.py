@@ -66,6 +66,14 @@ class CupOccupancyNode(Node):
         # around base +Z).  Replaces the old p_start (L1_L) + v_dir (3D unit)
         # pair so the pose can be set with the same convention the API uses.
         self.declare_parameter('cp', [0.450, 0.0, 0.1])
+        # Static exo→base calibration nudge ADDED on top of cp (incl. the value
+        # geometry-sync mirrors from the server center). The exo world frame is
+        # shifted from base_link, so placed cups are *detected* ~+x/-y of their
+        # API place coords; without this the cup lands at the slot box edge and
+        # /stack flickers/misfires. +x,-y moves the boxes onto the detected
+        # cups. z is never offset (cp_z = perceived cup-top height). See _cp().
+        self.declare_parameter('cp_offset_x', 0.0)
+        self.declare_parameter('cp_offset_y', 0.0)
         # 기본 90° = FastAPI RobotDomain DEFAULT_PYRAMID_DEGREE 와 일치
         # (행을 base +Y 로 펼침). 0° 이면 +X 라 Pyramid API 와 90° 어긋남.
         self.declare_parameter('degree', 90.0)
@@ -203,6 +211,19 @@ class CupOccupancyNode(Node):
                     throttle_duration_sec=15.0)
             time.sleep(period)
 
+    def _cp(self):
+        """cp anchor (L1_M) with the static exo→base calibration offset applied.
+
+        geometry-sync mirrors the server's pyramid CENTER into the ``cp`` param,
+        but the exo world frame is shifted from base_link — placed cups are
+        detected ~+x/-y of their API place coords. ``cp_offset_x/y`` nudge the
+        slot boxes (and the cp/arrow markers + row-snap corridor) onto the
+        detected cups so /stack flips correctly. z is never offset."""
+        cp = list(self.get_parameter('cp').value)
+        cp[0] = float(cp[0]) + float(self.get_parameter('cp_offset_x').value)
+        cp[1] = float(cp[1]) + float(self.get_parameter('cp_offset_y').value)
+        return cp
+
     # ── 가상 박스 기하 ─────────────────────────────────────────────────────
     def get_virtual_box(self, index: int, layer: int = 0):
         """AABB for slot (layer, index) in the fixed [3,2,1] layout.
@@ -217,7 +238,7 @@ class CupOccupancyNode(Node):
           • Vertical: cp.z + layer · (cup_h + layer_gap)
         Box itself stays AABB (matching depth_digital_twin's box convention).
         """
-        cp = self.get_parameter('cp').value
+        cp = self._cp()
         deg = float(self.get_parameter('degree').value)
         theta = math.radians(deg)
         ux, uy = math.cos(theta), math.sin(theta)
@@ -336,7 +357,7 @@ class CupOccupancyNode(Node):
         by their lateral order along the pyramid row instead of requiring precise
         box/slot overlap.
         """
-        cp = self.get_parameter('cp').value
+        cp = self._cp()
         deg = float(self.get_parameter('degree').value)
         theta = math.radians(deg)
         ux, uy = math.cos(theta), math.sin(theta)
@@ -647,7 +668,7 @@ class CupOccupancyNode(Node):
 
         Sphere sits at cp (= L1_M).  Arrow shows the +X row direction in the
         base XY plane (length = arrow_length parameter)."""
-        cp = self.get_parameter('cp').value
+        cp = self._cp()
         deg = float(self.get_parameter('degree').value)
         theta = math.radians(deg)
         ux, uy = math.cos(theta), math.sin(theta)
