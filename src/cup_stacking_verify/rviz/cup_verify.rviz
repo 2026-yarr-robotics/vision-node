@@ -9,7 +9,7 @@ Panels:
         - /Image1
         - /DepthCloud1/Auto Size1
       Splitter Ratio: 0.5
-    Tree Height: 128
+    Tree Height: 371
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -55,16 +55,6 @@ Visualization Manager:
           Value: true
         exo_link:
           Value: true
-        hand_color_frame:
-          Value: true
-        hand_color_optical_frame:
-          Value: true
-        hand_depth_frame:
-          Value: true
-        hand_depth_optical_frame:
-          Value: true
-        hand_link:
-          Value: true
         link_1:
           Value: true
         link_2:
@@ -88,21 +78,20 @@ Visualization Manager:
         exo_link:
           exo_color_frame:
             exo_color_optical_frame:
-              {}
+              world:
+                aruco:
+                  {}
+                base_link:
+                  link_1:
+                    link_2:
+                      link_3:
+                        link_4:
+                          link_5:
+                            link_6:
+                              {}
           exo_depth_frame:
             exo_depth_optical_frame:
               {}
-        world:
-          aruco:
-            {}
-          base_link:
-            link_1:
-              link_2:
-                link_3:
-                  link_4:
-                    link_5:
-                      link_6:
-                        {}
       Update Interval: 0
       Value: true
     - Class: rviz_default_plugins/MarkerArray
@@ -173,7 +162,10 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
-        {}
+        box_labels: true
+        box_outline: true
+        box_top: true
+        boxes: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -321,25 +313,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.1475977897644043
+      Distance: 1.301935076713562
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.4897119998931885
-        Y: -0.3724808394908905
-        Z: 0.19683463871479034
+        X: 0.495378702878952
+        Y: -0.1470818668603897
+        Z: 0.3441448211669922
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.3200001120567322
+      Pitch: 0.9949992299079895
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 6.123193740844727
+      Yaw: 5.668193340301514
     Saved: ~
 Window Geometry:
   Displays:
@@ -349,7 +341,7 @@ Window Geometry:
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc020000000bfb000000100044006900730070006c006100790073010000003d00000103000000c900fffffffb0000000a005600690065007700730100000146000000bf000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000002800fffffffb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d006100670065010000020b000001000000002800fffffffb0000000a0049006d006100670065000000028f000000a70000002800fffffffb0000000a0049006d0061006700650000000317000000c40000000000000000fb0000000a0049006d0061006700650100000311000000ca0000000000000000fb0000000a0049006d0061006700650100000311000000ca0000002800ffffff000001cc0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc020000000bfb000000100044006900730070006c006100790073000000003d000001cf000000c900fffffffb0000000a005600690065007700730000000192000000f8000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000002800fffffffb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d006100670065000000003d0000039e0000002800fffffffb0000000a0049006d006100670065000000028f000000a70000002800fffffffb0000000a0049006d0061006700650000000317000000c40000002800fffffffb0000000a0049006d0061006700650100000311000000ca0000000000000000fb0000000a0049006d0061006700650100000311000000ca00000000000000000000039d0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 925
