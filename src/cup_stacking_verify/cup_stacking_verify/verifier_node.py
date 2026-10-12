@@ -132,7 +132,13 @@ class CupOccupancyNode(Node):
         self.declare_parameter('confirm_on_s', 0.6)
         self.declare_parameter('confirm_min_observations', 2)
         self.declare_parameter('confirm_max_gap_s', 5.0)
-        self.declare_parameter('release_off_s', 5.0)
+        # 2026-06-17: 5.0 -> 10.0. During upper-tier (L2/L3) placement the arm
+        # parks over the pyramid centre and occludes a confirmed L1 cup for >5 s;
+        # the verifier then released the slot -> the LLM re-picked an
+        # already-placed cup, wasting a cup so L3_top had none left. 10 s rides
+        # out the placement occlusion while still surfacing a real vanish (c
+        # disturbance) within ~10 s for recovery.
+        self.declare_parameter('release_off_s', 10.0)
         self.declare_parameter('release_max_age_s', 7.0)
         self._stack_slot_keys = _build_slot_keys(LAYER_COUNTS)
         # slot_key -> dict(present_since, obs_count, last_seen_t, color, tid, confirmed)
@@ -508,7 +514,14 @@ class CupOccupancyNode(Node):
                 self._slot_state[slot] = st
             st['obs_count'] += 1
             st['last_seen_t'] = now
-            st['tid'] = tid
+            # Keep the last VALID depth track id. An occluded / re-acquiring
+            # frame (robot arm over the slot during a place) reports tid=-1, and
+            # blindly overwriting wiped a confirmed slot's id out of
+            # /stack_track_ids → point_cloud_node stopped subtracting it →
+            # cups_on_table over-counted the placed cup as still on the table
+            # (LLM then chased a phantom cup -> no_graspable_cup retries).
+            if tid >= 0:
+                st['tid'] = tid
             # LATCH the slot color by majority vote over the streak instead of
             # overwriting every frame: a single HSV misclassification (red↔orange,
             # blue↔purple at the bucket boundaries) can't flip the reported color

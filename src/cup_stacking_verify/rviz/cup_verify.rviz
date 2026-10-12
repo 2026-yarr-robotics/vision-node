@@ -40,29 +40,9 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        aruco:
-          Value: true
         base_link:
           Value: true
-        exo_color_frame:
-          Value: true
         exo_color_optical_frame:
-          Value: true
-        exo_depth_frame:
-          Value: true
-        exo_depth_optical_frame:
-          Value: true
-        exo_link:
-          Value: true
-        hand_color_frame:
-          Value: true
-        hand_color_optical_frame:
-          Value: true
-        hand_depth_frame:
-          Value: true
-        hand_depth_optical_frame:
-          Value: true
-        hand_link:
           Value: true
         link_1:
           Value: true
@@ -86,8 +66,6 @@ Visualization Manager:
       Tree:
         exo_color_optical_frame:
           world:
-            aruco:
-              {}
             base_link:
               link_1:
                 link_2:
@@ -96,22 +74,19 @@ Visualization Manager:
                       link_5:
                         link_6:
                           {}
-        exo_link:
-          exo_color_frame:
-            {}
-          exo_depth_frame:
-            exo_depth_optical_frame:
-              {}
       Update Interval: 0
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: VirtualCupMarkers
       Namespaces:
+        detected_cups: true
+        overlap_text: true
         pose_dir: true
         pose_origin: true
         pose_text: true
         virtual_boundary: true
+        virtual_cups: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -123,10 +98,13 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
+        detected_cups: true
+        overlap_text: true
         pose_dir: true
         pose_origin: true
         pose_text: true
         virtual_boundary: true
+        virtual_cups: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -172,7 +150,10 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
-        {}
+        box_labels: true
+        box_outline: true
+        box_top: true
+        boxes: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -181,7 +162,7 @@ Visualization Manager:
         Value: /digital_twin/boxes
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: false
+      Enabled: true
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -193,7 +174,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /digital_twin/detection_debug
-      Value: false
+      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -252,25 +233,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 5.248661518096924
+      Distance: 1.7540504932403564
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.4897119998931885
-        Y: -0.3724808394908905
-        Z: 0.19683463871479034
+        X: 0.39004242420196533
+        Y: -0.022144408896565437
+        Z: 0.3645734190940857
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.39000004529953003
+      Pitch: 1.1550010442733765
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 0.034999750554561615
+      Yaw: 4.821322441101074
     Saved: ~
 Window Geometry:
   Displays:
@@ -280,9 +261,9 @@ Window Geometry:
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc0200000009fb000000100044006900730070006c006100790073010000003d00000150000000c900fffffffb0000000a005600690065007700730100000193000000f7000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000000000000000fb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d00610067006501000002900000014b0000002800fffffffb0000000a0049006d006100670065000000028f000000a70000000000000000fb0000000a0049006d0061006700650000000317000000c40000002800ffffff000001cc0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001620000039efc0200000009fb000000100044006900730070006c006100790073010000003d00000150000000c900fffffffb0000000a005600690065007700730100000193000000f7000000a400fffffffb0000000c00430061006d0065007200610100000310000000cb0000000000000000fb0000000a0049006d00610067006500000001cf000001000000002800fffffffb0000000a0049006d006100670065000000020d000000df0000002800fffffffb0000000a0049006d0061006700650000000270000000a90000002800fffffffb0000000a0049006d00610067006501000002900000014b0000002800fffffffb0000000a0049006d006100670065000000028f000000a70000000000000000fb0000000a0049006d0061006700650000000317000000c40000000000000000000002350000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 925
-  X: 995
-  Y: 27
+  X: 13
+  Y: 583
